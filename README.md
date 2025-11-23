@@ -2,6 +2,19 @@
 
 A collection of Python scripts to simulate **Policy Debate tournaments** using Swiss-system pairing rules. Policy Debate tournaments closely follow Swiss system conventions with additional side constraints (Affirmative/Negative) and specific pairing rules.
 
+## 🌐 Web Application
+
+**Try it online:** [https://iceboxcoldice.github.io/swiss_tournament_sim/](https://iceboxcoldice.github.io/swiss_tournament_sim/)
+
+Run tournament simulations directly in your browser - no installation required! The web app provides an intuitive tabbed interface for all simulation tools:
+
+- **Head-to-Head Probability**: Calculate win probability between teams with specific histories
+- **Top N Probability**: Determine probability of each rank finishing in top N positions
+- **Win Distribution**: Analyze win distribution for teams with specific true ranks
+- **Rank from Wins**: Find rank distribution for teams with specific win counts
+- **Rank from History**: Discover rank distribution for teams with specific win/loss sequences
+
+
 ## Policy Debate & Swiss System Alignment
 
 Policy Debate tournament pairing rules align with traditional Swiss system pairing:

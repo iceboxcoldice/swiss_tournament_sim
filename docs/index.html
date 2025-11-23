@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Policy Debate Tournament Simulator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1e40af;
+            --secondary: #10b981;
+            --background: #0f172a;
+            --surface: #1e293b;
+            --surface-light: #334155;
+            --text: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border: #475569;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 2rem 1rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 2rem;
+            overflow-x: auto;
+            padding-bottom: 0.5rem;
+        }
+
+        .tab {
+            padding: 0.75rem 1.5rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+            font-weight: 500;
+        }
+
+        .tab:hover {
+            background: var(--surface-light);
+        }
+
+        .tab.active {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .card {
+            background: var(--surface);
+            border-radius: 1rem;
+            padding: 2rem;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+            margin-bottom: 2rem;
+            border: 1px solid var(--border);
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: var(--text);
+        }
+
+        input[type="text"],
+        input[type="number"],
+        select {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: var(--background);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            color: var(--text);
+            font-size: 1rem;
+            transition: all 0.2s;
+        }
+
+        input:focus,
+        select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        input[type="checkbox"] {
+            width: 1.25rem;
+            height: 1.25rem;
+            cursor: pointer;
+        }
+
+        button {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 0.5rem;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(37, 99, 235, 0.3);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .progress-container {
+            margin-top: 1.5rem;
+            display: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 0.5rem;
+            background: var(--background);
+            border-radius: 0.25rem;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .progress-text {
+            margin-top: 0.5rem;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .results {
+            display: none;
+        }
+
+        .results-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .results-header h2 {
+            font-size: 1.8rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: var(--background);
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            border: 1px solid var(--border);
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .stat-value.primary {
+            color: var(--primary);
+        }
+
+        .stat-value.secondary {
+            color: var(--secondary);
+        }
+
+        .distribution-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        .distribution-table th,
+        .distribution-table td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .distribution-table th {
+            background: var(--background);
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        .distribution-table tr:hover {
+            background: var(--surface-light);
+        }
+
+        .bar-chart {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .bar {
+            height: 1.5rem;
+            background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
+            border-radius: 0.25rem;
+            transition: width 0.3s;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2rem;
+            }
+
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+
+            .tabs {
+                flex-wrap: wrap;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>Policy Debate Tournament Simulator</h1>
+            <p class="subtitle">Monte Carlo Simulation Tools</p>
+        </header>
+
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('headToHead')">Head-to-Head</div>
+            <div class="tab" onclick="switchTab('topN')">Top N Probability</div>
+            <div class="tab" onclick="switchTab('winDist')">Win Distribution</div>
+            <div class="tab" onclick="switchTab('rankFromWins')">Rank from Wins</div>
+            <div class="tab" onclick="switchTab('rankFromHistory')">Rank from History</div>
+        </div>
+
+        <!-- Head-to-Head Tab -->
+        <div id="headToHead" class="tab-content active">
+            <div class="card">
+                <h2 style="margin-bottom: 1.5rem;">Head-to-Head Probability</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">Calculate the probability of one team
+                    beating another based on their tournament histories.</p>
+
+                <form id="h2hForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="h2h_teams">Number of Teams</label>
+                            <input type="number" id="h2h_teams" value="167" min="2" max="500" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="h2h_rounds">Number of Rounds</label>
+                            <input type="number" id="h2h_rounds" value="7" min="1" max="20" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="h2h_historyA">Team A History</label>
+                            <input type="text" id="h2h_historyA" value="W W L" placeholder="e.g., W W L" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="h2h_historyB">Team B History</label>
+                            <input type="text" id="h2h_historyB" value="W L W" placeholder="e.g., W L W" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="h2h_minMatchups">Minimum Matchups</label>
+                            <input type="number" id="h2h_minMatchups" value="100" min="10" max="1000" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="h2h_winModel">Win Model</label>
+                            <select id="h2h_winModel">
+                                <option value="elo" selected>Elo (Realistic)</option>
+                                <option value="linear">Linear</option>
+                                <option value="deterministic">Deterministic</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group checkbox-group">
+                        <input type="checkbox" id="h2h_buchholz" checked>
+                        <label for="h2h_buchholz">Use Buchholz Pairing</label>
+                    </div>
+
+                    <button type="submit">Run Simulation</button>
+
+                    <div class="progress-container" id="h2h_progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="h2h_progressFill"></div>
+                        </div>
+                        <div class="progress-text" id="h2h_progressText">Running simulations...</div>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card results" id="h2h_results">
+                <div class="results-header">
+                    <h2>Results</h2>
+                    <p id="h2h_matchupDisplay" style="color: var(--text-muted); font-size: 1.2rem;"></p>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Team A Win Rate</div>
+                        <div class="stat-value primary" id="h2h_teamAPerc"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Team B Win Rate</div>
+                        <div class="stat-value secondary" id="h2h_teamBPerc"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Total Matchups</div>
+                        <div class="stat-value" id="h2h_totalMatchups"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Simulations Run</div>
+                        <div class="stat-value" id="h2h_simsRun"></div>
+                    </div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-label">Average Ranks</div>
+                    <div style="margin-top: 1rem;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                            <span>Team A:</span>
+                            <span id="h2h_teamARank" style="font-weight: 600;"></span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span>Team B:</span>
+                            <span id="h2h_teamBRank" style="font-weight: 600;"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Top N Probability Tab -->
+        <div id="topN" class="tab-content">
+            <div class="card">
+                <h2 style="margin-bottom: 1.5rem;">Top N Probability</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">Calculate the probability of each rank
+                    finishing in the top N positions.</p>
+
+                <form id="topNForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="topN_teams">Number of Teams</label>
+                            <input type="number" id="topN_teams" value="167" min="2" max="500" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="topN_rounds">Number of Rounds</label>
+                            <input type="number" id="topN_rounds" value="7" min="1" max="20" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="topN_n">Top N Positions</label>
+                            <input type="number" id="topN_n" value="32" min="1" max="100" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="topN_sims">Simulations</label>
+                            <input type="number" id="topN_sims" value="1000" min="100" max="10000" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="topN_winModel">Win Model</label>
+                            <select id="topN_winModel">
+                                <option value="elo" selected>Elo (Realistic)</option>
+                                <option value="linear">Linear</option>
+                                <option value="deterministic">Deterministic</option>
+                            </select>
+                        </div>
+                        <div class="form-group checkbox-group" style="align-self: end;">
+                            <input type="checkbox" id="topN_buchholz" checked>
+                            <label for="topN_buchholz">Use Buchholz Pairing</label>
+                        </div>
+                    </div>
+
+                    <button type="submit">Run Simulation</button>
+
+                    <div class="progress-container" id="topN_progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="topN_progressFill"></div>
+                        </div>
+                        <div class="progress-text" id="topN_progressText">Running simulations...</div>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card results" id="topN_results">
+                <div class="results-header">
+                    <h2>Top N Probability Results</h2>
+                </div>
+
+                <table class="distribution-table">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Probability</th>
+                            <th>Visualization</th>
+                        </tr>
+                    </thead>
+                    <tbody id="topN_tableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Win Distribution Tab -->
+        <div id="winDist" class="tab-content">
+            <div class="card">
+                <h2 style="margin-bottom: 1.5rem;">Win Distribution from True Rank</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">Calculate the distribution of wins for a
+                    team with a specific true rank.</p>
+
+                <form id="winDistForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="winDist_teams">Number of Teams</label>
+                            <input type="number" id="winDist_teams" value="167" min="2" max="500" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="winDist_rounds">Number of Rounds</label>
+                            <input type="number" id="winDist_rounds" value="7" min="1" max="20" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="winDist_rank">True Rank</label>
+                            <input type="number" id="winDist_rank" value="10" min="1" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="winDist_sims">Simulations</label>
+                            <input type="number" id="winDist_sims" value="1000" min="100" max="10000" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="winDist_winModel">Win Model</label>
+                            <select id="winDist_winModel">
+                                <option value="elo" selected>Elo (Realistic)</option>
+                                <option value="linear">Linear</option>
+                                <option value="deterministic">Deterministic</option>
+                            </select>
+                        </div>
+                        <div class="form-group checkbox-group" style="align-self: end;">
+                            <input type="checkbox" id="winDist_buchholz" checked>
+                            <label for="winDist_buchholz">Use Buchholz Pairing</label>
+                        </div>
+                    </div>
+
+                    <button type="submit">Run Simulation</button>
+
+                    <div class="progress-container" id="winDist_progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="winDist_progressFill"></div>
+                        </div>
+                        <div class="progress-text" id="winDist_progressText">Running simulations...</div>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card results" id="winDist_results">
+                <div class="results-header">
+                    <h2>Win Distribution Results</h2>
+                    <p id="winDist_subtitle" style="color: var(--text-muted);"></p>
+                </div>
+
+                <table class="distribution-table">
+                    <thead>
+                        <tr>
+                            <th>Wins</th>
+                            <th>Probability</th>
+                            <th>Count</th>
+                            <th>Visualization</th>
+                        </tr>
+                    </thead>
+                    <tbody id="winDist_tableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Rank from Wins Tab -->
+        <div id="rankFromWins" class="tab-content">
+            <div class="card">
+                <h2 style="margin-bottom: 1.5rem;">Rank Distribution from Win Count</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">Calculate the distribution of true ranks for
+                    teams with a specific number of wins.</p>
+
+                <form id="rankFromWinsForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="rankWins_teams">Number of Teams</label>
+                            <input type="number" id="rankWins_teams" value="167" min="2" max="500" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="rankWins_rounds">Number of Rounds</label>
+                            <input type="number" id="rankWins_rounds" value="7" min="1" max="20" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="rankWins_wins">Target Wins</label>
+                            <input type="number" id="rankWins_wins" value="4" min="0" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="rankWins_sims">Simulations</label>
+                            <input type="number" id="rankWins_sims" value="1000" min="100" max="10000" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="rankWins_winModel">Win Model</label>
+                            <select id="rankWins_winModel">
+                                <option value="elo" selected>Elo (Realistic)</option>
+                                <option value="linear">Linear</option>
+                                <option value="deterministic">Deterministic</option>
+                            </select>
+                        </div>
+                        <div class="form-group checkbox-group" style="align-self: end;">
+                            <input type="checkbox" id="rankWins_buchholz" checked>
+                            <label for="rankWins_buchholz">Use Buchholz Pairing</label>
+                        </div>
+                    </div>
+
+                    <button type="submit">Run Simulation</button>
+
+                    <div class="progress-container" id="rankWins_progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="rankWins_progressFill"></div>
+                        </div>
+                        <div class="progress-text" id="rankWins_progressText">Running simulations...</div>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card results" id="rankWins_results">
+                <div class="results-header">
+                    <h2>Rank Distribution Results</h2>
+                    <p id="rankWins_subtitle" style="color: var(--text-muted);"></p>
+                </div>
+
+                <div class="stats-grid" style="margin-bottom: 2rem;">
+                    <div class="stat-card">
+                        <div class="stat-label">Average Rank</div>
+                        <div class="stat-value primary" id="rankWins_avgRank"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Most Common Rank</div>
+                        <div class="stat-value secondary" id="rankWins_mostCommon"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Total Teams Found</div>
+                        <div class="stat-value" id="rankWins_totalTeams"></div>
+                    </div>
+                </div>
+
+                <table class="distribution-table">
+                    <thead>
+                        <tr>
+                            <th>True Rank</th>
+                            <th>Probability</th>
+                            <th>Count</th>
+                            <th>Visualization</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rankWins_tableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Rank from History Tab -->
+        <div id="rankFromHistory" class="tab-content">
+            <div class="card">
+                <h2 style="margin-bottom: 1.5rem;">Rank Distribution from History</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">Calculate the distribution of true ranks for
+                    teams with a specific win/loss history.</p>
+
+                <form id="rankHistoryForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="rankHistory_teams">Number of Teams</label>
+                            <input type="number" id="rankHistory_teams" value="167" min="2" max="500" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="rankHistory_rounds">Number of Rounds</label>
+                            <input type="number" id="rankHistory_rounds" value="7" min="1" max="20" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="rankHistory_history">History (e.g., "W W L W L")</label>
+                            <input type="text" id="rankHistory_history" value="W W L W L" placeholder="e.g., W W L W L"
+                                required>
+                        </div>
+                        <div class="form-group">
+                            <label for="rankHistory_sims">Simulations</label>
+                            <input type="number" id="rankHistory_sims" value="1000" min="100" max="10000" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="rankHistory_winModel">Win Model</label>
+                            <select id="rankHistory_winModel">
+                                <option value="elo" selected>Elo (Realistic)</option>
+                                <option value="linear">Linear</option>
+                                <option value="deterministic">Deterministic</option>
+                            </select>
+                        </div>
+                        <div class="form-group checkbox-group" style="align-self: end;">
+                            <input type="checkbox" id="rankHistory_buchholz" checked>
+                            <label for="rankHistory_buchholz">Use Buchholz Pairing</label>
+                        </div>
+                    </div>
+
+                    <button type="submit">Run Simulation</button>
+
+                    <div class="progress-container" id="rankHistory_progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="rankHistory_progressFill"></div>
+                        </div>
+                        <div class="progress-text" id="rankHistory_progressText">Running simulations...</div>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card results" id="rankHistory_results">
+                <div class="results-header">
+                    <h2>Rank Distribution Results</h2>
+                    <p id="rankHistory_subtitle" style="color: var(--text-muted);"></p>
+                </div>
+
+                <div class="stats-grid" style="margin-bottom: 2rem;">
+                    <div class="stat-card">
+                        <div class="stat-label">Average Rank</div>
+                        <div class="stat-value primary" id="rankHistory_avgRank"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Most Common Rank</div>
+                        <div class="stat-value secondary" id="rankHistory_mostCommon"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Total Teams Found</div>
+                        <div class="stat-value" id="rankHistory_totalTeams"></div>
+                    </div>
+                </div>
+
+                <table class="distribution-table">
+                    <thead>
+                        <tr>
+                            <th>True Rank</th>
+                            <th>Probability</th>
+                            <th>Count</th>
+                            <th>Visualization</th>
+                        </tr>
+                    </thead>
+                    <tbody id="rankHistory_tableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="simulation.js"></script>
+    <script src="ui.js"></script>
+</body>
+
+</html>
