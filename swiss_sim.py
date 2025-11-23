@@ -175,7 +175,9 @@ def pair_round(teams: List[Team], round_num: int, use_buchholz: bool = False) ->
             score_groups[t.score].append(t)
     else:
         # Rounds 0-1: Don't consider scores, treat all teams as one group for random pairing
-        score_groups[0] = teams.copy()  # Create a copy to avoid mutating original list
+        # Create new list with same team references (shallow copy) to avoid mutating original list
+        for t in teams:
+            score_groups[0].append(t)
 
     sorted_scores = sorted(score_groups.keys(), reverse=True)
 
