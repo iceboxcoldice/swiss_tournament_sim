@@ -50,7 +50,7 @@ def main():
     HISTORY_STR = args.history.replace(" ", "").upper()
     TARGET_WINS = HISTORY_STR.count("W")
     NUM_SIMULATIONS = args.simulations
-    USE_BUCHHOLZ = args.use_buchholz_pairing
+    USE_BUCHHOLZ = not args.donotuse_buchholz_pairing
     WIN_MODEL = args.win_model
 
     # Track true‑rank distribution for teams with target wins

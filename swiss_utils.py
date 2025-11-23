@@ -11,8 +11,8 @@ def create_base_parser(description):
 
 def add_common_args(parser):
     """Add common arguments to a parser."""
-    parser.add_argument("--use-buchholz-pairing", action="store_true", 
-                       help="Use Buchholz score for pairing (default: False)")
+    parser.add_argument("--donotuse-buchholz-pairing", action="store_true", 
+                       help="Don't use Buchholz score for pairing (default: False)")
     parser.add_argument("--win-model", type=str, 
                        choices=['elo', 'linear', 'deterministic'], 
                        default='elo', 
@@ -31,15 +31,9 @@ def add_simulations_arg(parser, default=10000):
                        help=f"Number of simulations to run (default: {default})")
     return parser
 
-def print_simulation_header(
-    num_teams, num_rounds, num_simulations, use_buchholz, win_model, 
-    extra_info=""
-):
+def print_simulation_header(num_teams, num_rounds, num_simulations, use_buchholz, win_model, extra_info=""):
     """Print standard simulation header."""
-    print(
-        f"Simulating {num_simulations} tournaments with {num_teams} teams, "
-        f"{num_rounds} rounds..."
-    )
+    print(f"Simulating {num_simulations} tournaments with {num_teams} teams, {num_rounds} rounds...")
     if extra_info:
         print(extra_info)
     print(f"Buchholz Pairing: {'Enabled' if use_buchholz else 'Disabled'}")

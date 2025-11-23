@@ -33,7 +33,7 @@ def main():
     NUM_ROUNDS = args.rounds
     TARGET_WINS = args.wins
     NUM_SIMULATIONS = args.simulations
-    USE_BUCHHOLZ = args.use_buchholz_pairing
+    USE_BUCHHOLZ = not args.donotuse_buchholz_pairing
     WIN_MODEL = args.win_model
     
     # Track true_rank distribution for teams with target wins

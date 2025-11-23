@@ -166,13 +166,19 @@ def pair_round(teams: List[Team], round_num: int, use_buchholz: bool = False) ->
     # Shuffle teams first to randomize order within score groups
     random.shuffle(teams)
     
+    
     # Group by score
     score_groups = defaultdict(list)
-    for t in teams:
-        score_groups[t.score].append(t)
-        
+    if round_num > 1:
+        # Rounds 2+: Group teams by their current scores
+        for t in teams:
+            score_groups[t.score].append(t)
+    else:
+        # Rounds 0-1: Don't consider scores, treat all teams as one group for random pairing
+        score_groups[0] = teams.copy()  # Create a copy to avoid mutating original list
+
     sorted_scores = sorted(score_groups.keys(), reverse=True)
-    
+
     round_pairs = []
     floaters = []
     
@@ -275,6 +281,9 @@ def run_tournament(
         if use_buchholz:
             for t in teams:
                 t.buchholz = sum(op.score for op in teams if op.id in t.opponents)
+    
+    # Sort teams by score (descending), then buchholz (descending) for final standings
+    teams.sort(key=lambda t: (t.score, t.buchholz), reverse=True)
     return teams
 
 def main():
@@ -295,7 +304,7 @@ def main():
     TOP_N = args.top_n
     NUM_SIMULATIONS = args.simulations
     DEBUG_RANKS = args.debug_ranks if args.debug_ranks else []
-    USE_BUCHHOLZ = args.use_buchholz_pairing
+    USE_BUCHHOLZ = not args.donotuse_buchholz_pairing
     WIN_MODEL = args.win_model
     
     # Track how often each rank finishes in top N

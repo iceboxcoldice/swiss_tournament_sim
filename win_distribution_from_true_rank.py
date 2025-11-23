@@ -33,7 +33,7 @@ def main():
     NUM_ROUNDS = args.rounds
     TARGET_TRUE_RANK = args.true_rank
     NUM_SIMULATIONS = args.simulations
-    USE_BUCHHOLZ = args.use_buchholz_pairing
+    USE_BUCHHOLZ = not args.donotuse_buchholz_pairing
     WIN_MODEL = args.win_model
     
     # Track win count distribution
