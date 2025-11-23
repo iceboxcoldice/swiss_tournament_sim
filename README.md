@@ -115,6 +115,11 @@ Omit the simulations count to automatically determine the number needed for stab
 python3 head_to_head_probability.py 128 5 "W W" "W L"
 ```
 
+Specify minimum matchups needed (default: 100):
+```bash
+python3 head_to_head_probability.py 167 7 "W W L" "W L W" --min-matchups 200
+```
+
 ## Common Options
 
 All scripts support the following optional arguments:

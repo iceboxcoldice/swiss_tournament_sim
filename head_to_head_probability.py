@@ -101,6 +101,12 @@ def main():
         default=None,
         help="Number of simulations (optional, will auto-determine if not provided)",
     )
+    parser.add_argument(
+        "--min-matchups",
+        type=int,
+        default=100,
+        help="Minimum matchups needed for adaptive mode (default: 100)",
+    )
     add_common_args(parser)
 
     args = parser.parse_args()
@@ -110,6 +116,7 @@ def main():
     HISTORY_A = args.history_a.replace(" ", "").upper()
     HISTORY_B = args.history_b.replace(" ", "").upper()
     NUM_SIMULATIONS = args.simulations
+    MIN_MATCHUPS = args.min_matchups
     USE_BUCHHOLZ = not args.donotuse_buchholz_pairing
     WIN_MODEL = args.win_model
 
@@ -134,7 +141,7 @@ def main():
         print()
         
         total_sims, matchups = adaptive_simulation(
-            NUM_TEAMS, NUM_ROUNDS, HISTORY_A, HISTORY_B, USE_BUCHHOLZ, WIN_MODEL
+            NUM_TEAMS, NUM_ROUNDS, HISTORY_A, HISTORY_B, USE_BUCHHOLZ, WIN_MODEL, MIN_MATCHUPS
         )
         
         # Process matchups (using probability_of_win simulation)
