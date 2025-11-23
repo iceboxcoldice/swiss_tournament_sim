@@ -9,7 +9,7 @@ Usage:
     python3 rank_by_wins.py <teams> <rounds> <wins> [simulations] [options]
 
 Example:
-    python3 rank_by_wins.py 128 7 5 10000 --win-model elo --use-buchholz-pairing
+    python3 rank_by_wins.py 128 7 5 10000 --win-model elo
 """
 
 import argparse

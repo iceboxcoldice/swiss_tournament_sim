@@ -29,7 +29,12 @@ python3 swiss_sim.py <teams> <rounds> <top_n> [simulations] [options]
 **Example:**
 Calculate the probability of finishing in the Top 32 for a 128-team, 7-round tournament:
 ```bash
-python3 swiss_sim.py 128 7 32 10000 --win-model elo --use-buchholz-pairing
+python3 swiss_sim.py 128 7 32 10000 --win-model elo
+```
+
+To disable Buchholz pairing:
+```bash
+python3 swiss_sim.py 128 7 32 10000 --donotuse-buchholz-pairing
 ```
 
 ---
@@ -88,7 +93,20 @@ All scripts support the following optional arguments:
     *   `elo` (default): Uses Elo rating (2000 - 50 * rank) to determine win probability.
     *   `linear`: Probability = 0.5 + (rank_diff / (2 * max_rank)).
     *   `deterministic`: Better rank always wins.
-*   `--use-buchholz-pairing`: Use Buchholz score (sum of opponents' scores) as a tiebreaker *during* pairing (not just for final standings). Default is `False`.
+*   `--donotuse-buchholz-pairing`: Disable Buchholz score (sum of opponents' scores) as a tiebreaker *during* pairing. By default, Buchholz pairing is **enabled**.
+
+## Implementation Notes
+
+### Pairing Logic
+*   **Rounds 0-1**: Teams are paired randomly without considering scores (all teams treated as one group).
+*   **Rounds 2+**: Teams are grouped by score and paired within groups (standard Swiss pairing).
+*   **List Handling**: The pairing function creates a shallow copy of the teams list to avoid mutating the original list structure during pairing, while preserving references to team objects for score updates.
+
+### Sorting
+*   After all rounds complete, teams are sorted by:
+    1. Score (descending)
+    2. Buchholz score (descending, as tiebreaker)
+*   This ensures accurate identification of top performers for probability calculations.
 
 ## Requirements
 

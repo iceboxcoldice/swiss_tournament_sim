@@ -5,7 +5,7 @@ win/loss history in a Swiss‑system tournament.
 
 Usage example:
     python3 true_rank_from_history.py 128 7 "W L W W L" 5000 \
-        --win-model elo --use-buchholz-pairing
+        --win-model elo
 
 The script treats the history as a sequence of wins ("W") and losses ("L").
 Only the total number of wins is used to filter teams, because the pairing

@@ -9,7 +9,7 @@ Usage:
     python3 win_distribution.py <teams> <rounds> <rank> [simulations] [options]
 
 Example:
-    python3 win_distribution.py 128 7 8 10000 --win-model elo --use-buchholz-pairing
+    python3 win_distribution.py 128 7 8 10000 --win-model elo
 """
 
 import argparse
