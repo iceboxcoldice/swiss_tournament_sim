@@ -1,10 +1,18 @@
-# Swiss Tournament Simulation Tools
+# Policy Debate Tournament Simulation Tools
 
-A collection of Python scripts to simulate Swiss-system tournaments, specifically designed to analyze "floating" pairing rules, side constraints (Aff/Neg), and the probability distributions of team rankings.
+A collection of Python scripts to simulate **Policy Debate tournaments** using Swiss-system pairing rules. Policy Debate tournaments closely follow Swiss system conventions with additional side constraints (Affirmative/Negative) and specific pairing rules.
+
+## Policy Debate & Swiss System Alignment
+
+Policy Debate tournament pairing rules align with traditional Swiss system pairing:
+*   **Score-based pairing**: Teams with similar win/loss records compete against each other
+*   **Floating**: Teams can be paired up or down to adjacent score brackets when necessary
+*   **Avoid repeats**: Teams should not face the same opponent twice
+*   **Side constraints**: Unique to Policy Debate - teams alternate between Affirmative (Aff) and Negative (Neg) sides, with rules to balance side assignments
 
 ## Features
 
-*   **Swiss Pairing Logic**: Implements standard Swiss pairing with support for:
+*   **Policy Debate Pairing Logic**: Implements Swiss pairing with Policy Debate-specific rules:
     *   Score groups
     *   Floating (pairing up/down)
     *   Side constraints (Aff/Neg) and balancing
