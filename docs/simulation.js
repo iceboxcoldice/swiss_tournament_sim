@@ -8,6 +8,7 @@ class Team {
         this.score = 0;
         this.opponents = new Set();
         this.history = [];
+        this.opponentHistory = [];
         this.buchholz = 0;
         this.wins = 0;
     }
@@ -97,6 +98,7 @@ function pairRound(teams, roundNum, useBuchholz) {
         remaining[0].wins += 1;
         remaining[0].history.push('W');
         remaining[0].opponents.add(-1);
+        remaining[0].opponentHistory.push(-1);
     }
 
     return pairs;
@@ -115,6 +117,8 @@ function runTournament(numTeams, numRounds, useBuchholz, winModel) {
             t2.score += s2;
             t1.opponents.add(t2.id);
             t2.opponents.add(t1.id);
+            t1.opponentHistory.push(t2.id);
+            t2.opponentHistory.push(t1.id);
 
             if (s1 > s2) {
                 t1.wins += 1;
@@ -165,9 +169,13 @@ async function runHeadToHeadSimulation(params, progressCallback) {
                 t.history.slice(0, historyB.length).join('') === historyB
             );
 
+            const targetRound = historyA.length;
+
             for (const teamA of teamsA) {
+                if (targetRound >= teamA.opponentHistory.length) continue;
+
                 for (const teamB of teamsB) {
-                    if (teamA.opponents.has(teamB.id)) {
+                    if (teamA.opponentHistory[targetRound] === teamB.id) {
                         matchupCount++;
                         teamARanks.push(teamA.trueRank);
                         teamBRanks.push(teamB.trueRank);

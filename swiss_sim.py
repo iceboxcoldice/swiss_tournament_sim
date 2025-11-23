@@ -18,6 +18,7 @@ class Team:
     last_side: Optional[str] = None
     side_history: dict = field(default_factory=dict)  # Opponent ID -> List of sides played
     history: list = field(default_factory=list)  # Win/Loss sequence ("W"/"L")
+    opponent_history: list = field(default_factory=list)  # List of opponent IDs by round
     
     def __hash__(self):
         return hash(self.id)
@@ -231,6 +232,7 @@ def pair_round(teams: List[Team], round_num: int, use_buchholz: bool = False) ->
             bye_team = floaters[0]
             bye_team.score += 1.0
             bye_team.opponents.add(-1)
+            bye_team.opponent_history.append(-1)
             # Bye usually doesn't count for sides, or counts as free Aff? 
             # Let's ignore side effect for bye in this sim
             
@@ -262,6 +264,8 @@ def run_tournament(
             # Record opponents for Buchholz
             t1.opponents.add(t2.id)
             t2.opponents.add(t1.id)
+            t1.opponent_history.append(t2.id)
+            t2.opponent_history.append(t1.id)
             # Update side counts and last side
             t1.aff_count += 1
             t2.neg_count += 1

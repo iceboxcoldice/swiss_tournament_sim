@@ -53,11 +53,19 @@ def adaptive_simulation(num_teams, num_rounds, history_a, history_b, use_buchhol
                       "".join(t.history[:len(history_b)]) == history_b]
             
             # Check if any teams with history_a played against teams with history_b
+            # ONLY in the very next round after the history
+            target_round = len(history_a)
+            
             for team_a in teams_a:
+                # Ensure target round exists (e.g. history isn't full tournament length)
+                if target_round >= len(team_a.opponent_history):
+                    continue
+                    
                 for team_b in teams_b:
-                    if team_b.id in team_a.opponents:
-                        # They played each other - simulate the matchup outcome
-                        # using probability_of_win based on their true ranks
+                    # Check if they played in the specific target round
+                    if team_a.opponent_history[target_round] == team_b.id:
+                        # They played each other in the target round
+                        # Simulate the matchup outcome using probability_of_win
                         prob_a_wins = probability_of_win(team_a, team_b)
                         a_wins = random.random() < prob_a_wins
                         
