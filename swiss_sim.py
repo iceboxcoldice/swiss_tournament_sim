@@ -10,7 +10,6 @@ class Team:
     id: int
     true_rank: int
     score: float = 0.0
-    opponents: Set[int] = field(default_factory=set)
     buchholz: float = 0.0
     wins: int = 0
     aff_count: int = 0
@@ -89,7 +88,7 @@ def find_best_opponent(t1: Team, group: List[Team]) -> Tuple[Optional[Team], int
     best_swappable_idx = -1
     
     for i, candidate in enumerate(group):
-        if candidate.id not in t1.opponents:
+        if candidate.id not in t1.opponent_history:
             # Priority 1: Non-repeat
             best_non_repeat = candidate
             best_non_repeat_idx = i
@@ -148,7 +147,7 @@ def update_buchholz(teams: List[Team]):
     """
     for t in teams:
         buchholz = 0
-        for opp_id in t.opponents:
+        for opp_id in t.opponent_history:
             if opp_id != -1: # Ignore bye
                 opp = next((tm for tm in teams if tm.id == opp_id), None)
                 if opp:
@@ -231,7 +230,6 @@ def pair_round(teams: List[Team], round_num: int, use_buchholz: bool = False) ->
             # Bye
             bye_team = floaters[0]
             bye_team.score += 1.0
-            bye_team.opponents.add(-1)
             bye_team.opponent_history.append(-1)
             # Bye usually doesn't count for sides, or counts as free Aff? 
             # Let's ignore side effect for bye in this sim
@@ -262,8 +260,6 @@ def run_tournament(
             t1.score += s1
             t2.score += s2
             # Record opponents for Buchholz
-            t1.opponents.add(t2.id)
-            t2.opponents.add(t1.id)
             t1.opponent_history.append(t2.id)
             t2.opponent_history.append(t1.id)
             # Update side counts and last side
@@ -286,7 +282,7 @@ def run_tournament(
 
         if use_buchholz:
             for t in teams:
-                t.buchholz = sum(op.score for op in teams if op.id in t.opponents)
+                t.buchholz = sum(op.score for op in teams if op.id in t.opponent_history)
     
     # Sort teams by score (descending), then buchholz (descending) for final standings
     teams.sort(key=lambda t: (t.score, t.buchholz), reverse=True)

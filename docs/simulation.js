@@ -6,7 +6,6 @@ class Team {
         this.id = id;
         this.trueRank = trueRank;
         this.score = 0;
-        this.opponents = new Set();
         this.history = [];
         this.opponentHistory = [];
         this.buchholz = 0;
@@ -72,7 +71,7 @@ function pairRound(teams, roundNum, useBuchholz) {
             let opponentIdx = -1;
 
             for (let i = 0; i < group.length; i++) {
-                if (!t1.opponents.has(group[i].id)) {
+                if (!t1.opponentHistory.includes(group[i].id)) {
                     opponentIdx = i;
                     break;
                 }
@@ -97,7 +96,6 @@ function pairRound(teams, roundNum, useBuchholz) {
         remaining[0].score += 1;
         remaining[0].wins += 1;
         remaining[0].history.push('W');
-        remaining[0].opponents.add(-1);
         remaining[0].opponentHistory.push(-1);
     }
 
@@ -115,8 +113,6 @@ function runTournament(numTeams, numRounds, useBuchholz, winModel) {
             const [s1, s2] = simulateMatch(t1, t2, winModel);
             t1.score += s1;
             t2.score += s2;
-            t1.opponents.add(t2.id);
-            t2.opponents.add(t1.id);
             t1.opponentHistory.push(t2.id);
             t2.opponentHistory.push(t1.id);
 
