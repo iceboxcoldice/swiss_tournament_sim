@@ -62,32 +62,34 @@
 
         .tabs {
             display: flex;
-            gap: 0.5rem;
+            gap: 1rem;
             margin-bottom: 2rem;
             overflow-x: auto;
-            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border);
         }
 
         .tab {
-            padding: 0.75rem 1.5rem;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 0.5rem;
+            padding: 0.75rem 1rem;
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
             color: var(--text-muted);
             cursor: pointer;
             transition: all 0.2s;
             white-space: nowrap;
             font-weight: 500;
+            margin-bottom: -1px;
         }
 
         .tab:hover {
-            background: var(--surface-light);
+            color: var(--text);
+            border-bottom-color: var(--surface-light);
         }
 
         .tab.active {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-            color: white;
-            border-color: var(--primary);
+            background: transparent;
+            color: var(--primary);
+            border-bottom-color: var(--primary);
         }
 
         .tab-content {
