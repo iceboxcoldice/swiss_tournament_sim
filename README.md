@@ -93,6 +93,28 @@ Analyze teams that started with 2 wins, lost 1, then won 2 (partial history):
 python3 true_rank_distribution_from_history.py 128 7 "WWLWW" 10000
 ```
 
+---
+
+### 5. `head_to_head_probability.py`
+Calculates the probability of one team beating another when they have specific win/loss histories. Useful for predicting matchup outcomes based on tournament performance.
+
+**Usage:**
+```bash
+python3 head_to_head_probability.py <teams> <rounds> <history_a> <history_b> [simulations] [options]
+```
+
+**Example:**
+Calculate the probability that a team with "W W" history beats a team with "W L" history:
+```bash
+python3 head_to_head_probability.py 128 5 "W W" "W L" 1000
+```
+
+**Adaptive Mode:**
+Omit the simulations count to automatically determine the number needed for stable results:
+```bash
+python3 head_to_head_probability.py 128 5 "W W" "W L"
+```
+
 ## Common Options
 
 All scripts support the following optional arguments:
