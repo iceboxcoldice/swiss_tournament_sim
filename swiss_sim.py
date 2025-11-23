@@ -8,7 +8,8 @@ from collections import defaultdict
 @dataclass
 class Team:
     id: int
-    true_rank: int
+    true_rank: int = 0  # Optional for real tournaments
+    name: str = ""      # Team name for real tournaments
     score: float = 0.0
     buchholz: float = 0.0
     wins: int = 0
@@ -194,6 +195,8 @@ def pair_round(teams: List[Team], round_num: int, use_buchholz: bool = False) ->
         # For Round 1 and 2, we want random pairing, so we skip the sort
         # (teams are already shuffled)
         if round_num > 1:
+            # If true_rank is 0 (real tournament), it won't affect sorting much, 
+            # effectively random within score/buchholz groups due to initial shuffle.
             if use_buchholz:
                 group.sort(key=lambda t: (t.score, t.buchholz, -t.true_rank), reverse=True)
             else:
