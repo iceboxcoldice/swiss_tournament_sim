@@ -91,7 +91,7 @@ def main():
     parser = create_base_parser(
         "Compute head-to-head win probability between two teams with given histories."
     )
-    add_tournament_args(parser)
+    parser.add_argument("teams", type=int, help="Number of teams")
     parser.add_argument(
         "history_a",
         type=str,
@@ -120,9 +120,14 @@ def main():
     args = parser.parse_args()
 
     NUM_TEAMS = args.teams
-    NUM_ROUNDS = args.rounds
     HISTORY_A = args.history_a.replace(" ", "").upper()
     HISTORY_B = args.history_b.replace(" ", "").upper()
+    NUM_ROUNDS = len(HISTORY_A) + 1
+
+    if len(HISTORY_A) != len(HISTORY_B):
+        print("Error: History lengths must match!")
+        return
+
     NUM_SIMULATIONS = args.simulations
     MIN_MATCHUPS = args.min_matchups
     USE_BUCHHOLZ = not args.donotuse_buchholz_pairing

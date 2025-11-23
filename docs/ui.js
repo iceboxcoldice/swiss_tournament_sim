@@ -24,9 +24,9 @@ document.getElementById('h2hForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
     const numTeams = parseInt(document.getElementById('h2h_teams').value);
-    const numRounds = parseInt(document.getElementById('h2h_rounds').value);
     const historyA = document.getElementById('h2h_historyA').value.replace(/\s/g, '').toUpperCase();
     const historyB = document.getElementById('h2h_historyB').value.replace(/\s/g, '').toUpperCase();
+    const numRounds = historyA.length + 1;
     const minMatchups = parseInt(document.getElementById('h2h_minMatchups').value);
     const useBuchholz = document.getElementById('h2h_buchholz').checked;
     const winModel = document.getElementById('h2h_winModel').value;
@@ -36,8 +36,8 @@ document.getElementById('h2hForm').addEventListener('submit', async (e) => {
         return;
     }
 
-    if (historyA.length > numRounds || historyB.length > numRounds) {
-        alert('History length cannot exceed number of rounds');
+    if (historyA.length !== historyB.length) {
+        alert('History lengths must match');
         return;
     }
 
