@@ -16,15 +16,19 @@ import argparse
 import json
 import os
 import sys
+import threading
 from dataclasses import asdict
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Callable, Tuple
 
 # Import Team and pairing logic from swiss_sim
 from swiss_sim import Team, pair_round
 
 TOURNAMENT_FILE = "tournament.json"
+# Global threading lock for safe concurrent writes
+_tournament_lock = threading.Lock()
 
-def load_tournament():
+def load_tournament_data() -> Tuple[Dict, List[Team]]:
+    """Loads tournament data and reconstructs Team objects."""
     if not os.path.exists(TOURNAMENT_FILE):
         print(f"Error: {TOURNAMENT_FILE} not found. Run 'init' first.")
         sys.exit(1)
@@ -56,12 +60,81 @@ def load_tournament():
         
     return data, teams
 
+def load_tournament() -> Tuple[Dict, List[Team]]:
+    """Loads tournament data (read-only)."""
+    return load_tournament_data()
+
 def save_tournament(data, teams):
     # Update teams data
     data['teams'] = [asdict(t) for t in teams]
+    # Write under lock
+    _tournament_lock.acquire()
+    try:
+        with open(TOURNAMENT_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+    finally:
+        _tournament_lock.release()
+
+def recalculate_stats(data: Dict, teams: List[Team], team_map: Dict[int, Team]):
+    """
+    Recalculates all team statistics (score, buchholz, wins, etc.) from scratch
+    based on all completed rounds in the tournament data.
+    This function assumes the _tournament_lock is already held.
+    """
+    # Reset teams
+    for t in teams:
+        t.score = 0
+        t.buchholz = 0
+        t.wins = 0
+        t.aff_count = 0
+        t.neg_count = 0
+        t.last_side = None
+        t.side_history = {}
+        t.history = []
+        t.opponent_history = []
+
+    # Replay all rounds
+    for r_data in data['rounds']:
+        for p in r_data['pairings']:
+            if p['result'] is None:
+                continue
+                
+            aff = team_map[p['aff_id']]
+            neg = team_map[p['neg_id']]
+            
+            # Record matchup
+            aff.opponent_history.append(neg.id)
+            neg.opponent_history.append(aff.id)
+            
+            # Sides
+            aff.aff_count += 1
+            neg.neg_count += 1
+            aff.last_side = "Aff"
+            neg.last_side = "Neg"
+            aff.side_history.setdefault(neg.id, []).append("Aff")
+            neg.side_history.setdefault(aff.id, []).append("Neg")
+            
+            # Result
+            if p['result'] == 'A':
+                aff.wins += 1
+                aff.score += 1
+                aff.history.append("W")
+                neg.history.append("L")
+            elif p['result'] == 'N':
+                neg.wins += 1
+                neg.score += 1
+                neg.history.append("W")
+                aff.history.append("L")
     
-    with open(TOURNAMENT_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
+    # Update Buchholz
+    for t in teams:
+        buchholz = 0
+        for opp_id in t.opponent_history:
+            if opp_id != -1: # Assuming -1 is used for byes or non-existent opponents
+                opp = team_map.get(opp_id)
+                if opp:
+                    buchholz += opp.score
+        t.buchholz = buchholz
 
 def cmd_init(args):
     if os.path.exists(TOURNAMENT_FILE) and not args.force:
@@ -94,13 +167,17 @@ def cmd_init(args):
         "teams": [asdict(t) for t in teams]
     }
     
-    with open(TOURNAMENT_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
-    
-    print(f"Initialized tournament with {args.teams} teams and {args.rounds} rounds.")
+    # Acquire the thread lock before writing
+    _tournament_lock.acquire()
+    try:
+        with open(TOURNAMENT_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+        print(f"Initialized tournament with {args.teams} teams and {args.rounds} rounds.")
+    finally:
+        _tournament_lock.release()
 
 def cmd_pair(args):
-    data, teams = load_tournament()
+    data, teams = load_tournament() # Lock acquired in load_tournament
     
     round_num = args.round
     
@@ -144,11 +221,11 @@ def cmd_pair(args):
     # Or maybe current_round tracks "pairing generated for X".
     # Let's keep current_round as "last fully completed round".
     
-    save_tournament(data, teams)
+    save_tournament(data, teams) # Lock released in save_tournament
     print(f"\nPairings saved. Use 'report {round_num}' to enter results.")
 
 def cmd_report(args):
-    data, teams = load_tournament()
+    data, teams = load_tournament() # Lock acquired in load_tournament
     round_num = args.round
     
     if round_num > len(data['rounds']):
@@ -172,51 +249,57 @@ def cmd_report(args):
     results_map = {}
     
     # Mode 1: Single match via CLI args
-    if args.aff_id is not None and args.neg_id is not None and args.result is not None:
-        aff_id = args.aff_id
-        neg_id = args.neg_id
-        winner = args.result.upper()
-        
-        # Find match
-        match = next((p for p in pairings if p['aff_id'] == aff_id and p['neg_id'] == neg_id), None)
-        if match:
-            if match['result'] and not args.force:
-                print(f"Error: Result for Match {match['match_id']} already recorded. Use --force to overwrite.")
-                return
-            results_map[match['match_id']] = winner
-            print(f"Recording result for Match {match['match_id']}: {match['aff_name']} vs {match['neg_name']} -> {winner}")
-        else:
-            print(f"Error: No match found for Aff {aff_id} vs Neg {neg_id} in Round {round_num}")
+    if args.match_id is not None:
+        match = next((p for p in pairings if p['match_id'] == args.match_id), None)
+        if not match:
+            print(f"Error: No match with ID {args.match_id} in Round {round_num}")
             return
+        # Optional consistency checks
+        if args.aff_id is not None and match['aff_id'] != args.aff_id:
+            print(f"Error: Aff ID mismatch for Match {args.match_id} (expected {match['aff_id']}, got {args.aff_id})")
+            return
+        if args.neg_id is not None and match['neg_id'] != args.neg_id:
+            print(f"Error: Neg ID mismatch for Match {args.match_id} (expected {match['neg_id']}, got {args.neg_id})")
+            return
+        if args.outcome is None:
+            print("Error: Outcome (A/N) must be provided for single match mode.")
+            return
+        winner = args.outcome.upper()
+        if match['result'] and not args.force:
+            print(f"Error: Result for Match {args.match_id} already recorded. Use --force to overwrite.")
+            return
+        results_map[match['match_id']] = winner
+        print(f"Recording result for Match {match['match_id']}: {match['aff_name']} vs {match['neg_name']} -> {winner}")
 
     # Mode 2: File input
     elif args.file:
         with open(args.file, 'r') as f:
             for line in f:
                 parts = line.strip().split()
-                # Expected format: Round AffID NegID Winner
-                # e.g. "1 2 6 A"
-                if len(parts) >= 4:
+                # Expected format: Round MatchID AffID NegID Outcome
+                if len(parts) >= 5:
                     try:
                         r_num = int(parts[0])
-                        aff_id = int(parts[1])
-                        neg_id = int(parts[2])
-                        winner = parts[3].upper()
-                        
+                        m_id = int(parts[1])
+                        aff_id = int(parts[2])
+                        neg_id = int(parts[3])
+                        outcome = parts[4].upper()
                         if r_num != round_num:
                             print(f"Skipping line (wrong round): {line.strip()}")
                             continue
-                            
-                        # Find match with these teams
-                        match = next((p for p in pairings if p['aff_id'] == aff_id and p['neg_id'] == neg_id), None)
-                        if match:
-                            results_map[match['match_id']] = winner
-                        else:
-                            print(f"Error: No match found for Aff {aff_id} vs Neg {neg_id} in Round {round_num}")
+                        match = next((p for p in pairings if p['match_id'] == m_id), None)
+                        if not match:
+                            print(f"Error: No match with ID {m_id} in Round {round_num}")
+                            continue
+                        # Optional consistency checks
+                        if match['aff_id'] != aff_id or match['neg_id'] != neg_id:
+                            print(f"Error: IDs in line do not match stored pairing for Match {m_id}. Skipping line.")
+                            continue
+                        results_map[match['match_id']] = outcome
                     except ValueError:
                         print(f"Skipping invalid line: {line.strip()}")
                 else:
-                    print(f"Skipping invalid format (need Round AffID NegID Winner): {line.strip()}")
+                    print(f"Skipping invalid format (need Round MatchID AffID NegID Outcome): {line.strip()}")
     
     # Mode 3: Interactive
     else:
@@ -271,86 +354,19 @@ def cmd_report(args):
     for p in pairings:
         match_id = p['match_id']
         if match_id in results_map:
-            winner = results_map[match_id]
-            p['result'] = winner
-            
-            aff_team = team_map[p['aff_id']]
-            neg_team = team_map[p['neg_id']]
-            
-            # Update stats
-            # We need to be careful not to double-count if re-reporting
-            # Ideally we should recalculate from scratch or handle undo.
-            # For simplicity, we assume linear progression. 
-            # If re-reporting, we might need to reload teams from previous state?
-            # Or just warn user.
-            
-            # For now, let's assume we are updating the current state. 
-            # But wait, if we run 'report' multiple times, we might add wins twice.
-            # Better approach: Re-calculate all team stats from full history of rounds.
-            pass
+            p['result'] = results_map[match_id]
 
-    # Re-calculate stats from scratch based on all rounds
-    # Reset teams
-    for t in teams:
-        t.score = 0
-        t.buchholz = 0
-        t.wins = 0
-        t.aff_count = 0
-        t.neg_count = 0
-        t.last_side = None
-        t.side_history = {}
-        t.history = []
-        t.opponent_history = []
-
-    # Replay all rounds
-    for r_data in data['rounds']:
-        for p in r_data['pairings']:
-            if p['result'] is None:
-                continue
-                
-            aff = team_map[p['aff_id']]
-            neg = team_map[p['neg_id']]
-            
-            # Record matchup
-            aff.opponent_history.append(neg.id)
-            neg.opponent_history.append(aff.id)
-            
-            # Sides
-            aff.aff_count += 1
-            neg.neg_count += 1
-            aff.last_side = "Aff"
-            neg.last_side = "Neg"
-            aff.side_history.setdefault(neg.id, []).append("Aff")
-            neg.side_history.setdefault(aff.id, []).append("Neg")
-            
-            # Result
-            if p['result'] == 'A':
-                aff.wins += 1
-                aff.score += 1
-                aff.history.append("W")
-                neg.history.append("L")
-            elif p['result'] == 'N':
-                neg.wins += 1
-                neg.score += 1
-                neg.history.append("W")
-                aff.history.append("L")
-    
-    # Update Buchholz
-    for t in teams:
-        buchholz = 0
-        for opp_id in t.opponent_history:
-            if opp_id != -1:
-                opp = team_map.get(opp_id)
-                if opp:
-                    buchholz += opp.score
-        t.buchholz = buchholz
-
-    # Update current_round if this round is complete
-    if all(p['result'] is not None for p in pairings) and data['current_round'] < round_num:
-        data['current_round'] = round_num
-        print(f"Round {round_num} completed.")
-
-    save_tournament(data, teams)
+    # Re-calculate all derived stats and persist atomically
+    _tournament_lock.acquire()
+    try:
+        recalculate_stats(data, teams, team_map)
+        # Update current round if completed
+        if all(p['result'] is not None for p in pairings) and data['current_round'] < round_num:
+            data['current_round'] = round_num
+            print(f"Round {round_num} completed.")
+        save_tournament(data, teams)
+    finally:
+        _tournament_lock.release()
     print("Results saved and stats updated.")
 
 def cmd_standings(args):
@@ -384,10 +400,11 @@ def main():
     # Report
     parser_report = subparsers.add_parser("report", help="Report results")
     parser_report.add_argument("round", type=int, help="Round number")
-    parser_report.add_argument("aff_id", type=int, nargs='?', help="Aff Team ID (optional)")
-    parser_report.add_argument("neg_id", type=int, nargs='?', help="Neg Team ID (optional)")
-    parser_report.add_argument("result", type=str, nargs='?', help="Result (A/N) (optional)")
-    parser_report.add_argument("--file", type=str, help="File with results (Round AffID NegID Winner)")
+    parser_report.add_argument("match_id", type=int, nargs='?', help="Match ID (optional)")
+    parser_report.add_argument("aff_id", type=int, nargs='?', help="Affirmative team ID (optional)")
+    parser_report.add_argument("neg_id", type=int, nargs='?', help="Negative team ID (optional)")
+    parser_report.add_argument("outcome", type=str, nargs='?', help="Outcome (A/N) (optional)")
+    parser_report.add_argument("--file", type=str, help="File with results (format: Round MatchID AffID NegID Outcome)")
     parser_report.add_argument("--force", action="store_true", help="Overwrite existing results")
     
     # Standings
