@@ -37,8 +37,29 @@ function simulateMatch(teamA, teamB, winModel) {
     return Math.random() < probA ? [1, 0] : [0, 1];
 }
 
+// Update Buchholz scores
+function updateBuchholz(teams) {
+    const teamMap = new Map(teams.map(t => [t.id, t]));
+    for (const t of teams) {
+        let buchholz = 0;
+        for (const oppId of t.opponentHistory) {
+            if (oppId !== -1) {
+                const opp = teamMap.get(oppId);
+                if (opp) {
+                    buchholz += opp.score;
+                }
+            }
+        }
+        t.buchholz = buchholz;
+    }
+}
+
 // Pair teams for a round
 function pairRound(teams, roundNum, useBuchholz) {
+    if (useBuchholz) {
+        updateBuchholz(teams);
+    }
+
     const teamsCopy = [...teams];
 
     // Shuffle for randomization
@@ -65,6 +86,15 @@ function pairRound(teams, roundNum, useBuchholz) {
     for (const score of sortedScores) {
         const group = [...scoreGroups[score], ...remaining];
         remaining.length = 0;
+
+        // Sort to match Python logic (Score -> Buchholz -> True Rank)
+        if (roundNum > 1) {
+            group.sort((a, b) => {
+                if (b.score !== a.score) return b.score - a.score;
+                if (useBuchholz && b.buchholz !== a.buchholz) return b.buchholz - a.buchholz;
+                return a.trueRank - b.trueRank;
+            });
+        }
 
         while (group.length >= 2) {
             const t1 = group.shift();
