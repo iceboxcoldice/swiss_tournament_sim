@@ -177,14 +177,43 @@ def cmd_init(args):
         _tournament_lock.release()
 
 def cmd_pair(args):
-    data, teams = load_tournament() # Lock acquired in load_tournament
+    data, teams = load_tournament()
     
     round_num = args.round
     
-    # Validation
-    if round_num != data['current_round'] + 1:
-        print(f"Error: Expected to pair Round {data['current_round'] + 1}, but got {round_num}.")
-        return
+    # Check if this round already exists (re-pairing scenario)
+    round_exists = round_num <= len(data['rounds'])
+    
+    # Validation: only allow pairing the next sequential round OR re-pairing the last round
+    if round_exists:
+        # Re-pairing an existing round
+        if round_num != len(data['rounds']):
+            print(f"Error: Can only re-pair the most recent round ({len(data['rounds'])}), not Round {round_num}.")
+            return
+    else:
+        # Pairing a new round - must be the next one
+        # Special case: if no rounds exist yet, must start with Round 1
+        if len(data['rounds']) == 0:
+            if round_num != 1:
+                print(f"Error: First round must be Round 1, not Round {round_num}.")
+                return
+        else:
+            expected_round = len(data['rounds']) + 1
+            if round_num != expected_round:
+                print(f"Error: Expected to pair Round {expected_round}, but got {round_num}.")
+                return
+    
+    # Check that all matches from the most recent existing round have results (unless we're re-pairing it)
+    # Special case: Round 2 doesn't need to wait for Round 1 results
+    if len(data['rounds']) > 0 and not round_exists and round_num > 2:
+        last_round = data['rounds'][-1]
+        unreported = [p for p in last_round['pairings'] if p['result'] is None]
+        if unreported:
+            print(f"Error: Cannot pair Round {round_num} until all results from Round {last_round['round_num']} are reported.")
+            print(f"\nUnreported matches from Round {last_round['round_num']}:")
+            for p in unreported:
+                print(f"  Match {p['match_id']}: {p['aff_name']} (ID: {p['aff_id']}) vs {p['neg_name']} (ID: {p['neg_id']})")
+            return
     
     print(f"Generating pairings for Round {round_num}...")
     
@@ -273,33 +302,164 @@ def cmd_report(args):
 
     # Mode 2: File input
     elif args.file:
+        # Collect errors by category
+        missing_matches = []
+        team_id_mismatches = []
+        outcome_conflicts = []
+        invalid_lines = []
+        
         with open(args.file, 'r') as f:
-            for line in f:
-                parts = line.strip().split()
+            for line_num, line in enumerate(f, 1):
+                # Skip comments and empty lines
+                stripped = line.strip()
+                if not stripped or stripped.startswith('#'):
+                    continue
+                    
+                parts = stripped.split()
                 # Expected format: Round MatchID AffID NegID Outcome
-                if len(parts) >= 5:
-                    try:
-                        r_num = int(parts[0])
-                        m_id = int(parts[1])
-                        aff_id = int(parts[2])
-                        neg_id = int(parts[3])
-                        outcome = parts[4].upper()
-                        if r_num != round_num:
-                            print(f"Skipping line (wrong round): {line.strip()}")
+                if len(parts) < 5:
+                    invalid_lines.append((line_num, stripped, "Insufficient fields (need Round MatchID AffID NegID Outcome)"))
+                    continue
+                    
+                try:
+                    r_num = int(parts[0])
+                    m_id = int(parts[1])
+                    aff_id = int(parts[2])
+                    neg_id = int(parts[3])
+                    outcome = parts[4].upper()
+                    
+                    if r_num != round_num:
+                        continue  # Silently skip wrong round
+                    
+                    match = next((p for p in pairings if p['match_id'] == m_id), None)
+                    if not match:
+                        missing_matches.append((
+                            line_num, 
+                            stripped, 
+                            m_id,
+                            f"Match={m_id} Aff={aff_id} Neg={neg_id} Outcome={outcome} | Match {m_id} does not exist in Round {round_num}"
+                        ))
+                        continue
+                    
+                    # Check team ID consistency
+                    if match['aff_id'] != aff_id or match['neg_id'] != neg_id:
+                        # Build detailed error message showing what was expected vs what was provided
+                        error_parts = []
+                        if match['aff_id'] != aff_id:
+                            error_parts.append(f"Aff: expected {match['aff_id']}, got {aff_id}")
+                        if match['neg_id'] != neg_id:
+                            error_parts.append(f"Neg: expected {match['neg_id']}, got {neg_id}")
+                        
+                        team_id_mismatches.append((
+                            line_num, 
+                            stripped, 
+                            m_id,
+                            f"Match={m_id} Aff={aff_id} Neg={neg_id} Outcome={outcome} | {' | '.join(error_parts)}"
+                        ))
+                        continue
+                    
+                    # Check for outcome conflicts (existing result differs)
+                    if match['result'] is not None:
+                        if match['result'] == outcome:
+                            # Duplicate line with matching result - silently skip (idempotent)
                             continue
-                        match = next((p for p in pairings if p['match_id'] == m_id), None)
-                        if not match:
-                            print(f"Error: No match with ID {m_id} in Round {round_num}")
+                        elif not args.force:
+                            # Conflicting result without --force
+                            outcome_conflicts.append((
+                                line_num,
+                                stripped,
+                                m_id,
+                                f"Match={m_id} Aff={aff_id} Neg={neg_id} Outcome={outcome} | Outcome conflict: existing={match['result']}, file={outcome}"
+                            ))
                             continue
-                        # Optional consistency checks
-                        if match['aff_id'] != aff_id or match['neg_id'] != neg_id:
-                            print(f"Error: IDs in line do not match stored pairing for Match {m_id}. Skipping line.")
-                            continue
-                        results_map[match['match_id']] = outcome
-                    except ValueError:
-                        print(f"Skipping invalid line: {line.strip()}")
-                else:
-                    print(f"Skipping invalid format (need Round MatchID AffID NegID Outcome): {line.strip()}")
+                    
+                    results_map[match['match_id']] = outcome
+                    
+                except ValueError as e:
+                    invalid_lines.append((line_num, stripped, f"Parse error: {str(e)}"))
+        
+        # Display categorized errors if any exist and not using --force
+        has_errors = missing_matches or team_id_mismatches or outcome_conflicts or invalid_lines
+        
+        if has_errors and not args.force:
+            print(f"\n⚠️  Found issues in {args.file}:\n")
+            
+            if missing_matches:
+                print(f"❌ Match ID Not Found ({len(missing_matches)} lines):")
+                for line_num, line_text, match_id, details in missing_matches:
+                    print(f"   Line {line_num}: {details}")
+                    print(f"   → {line_text}")
+                print()
+            
+            if team_id_mismatches:
+                print(f"❌ Team ID Mismatch ({len(team_id_mismatches)} lines):")
+                for line_num, line_text, match_id, details in team_id_mismatches:
+                    print(f"   Line {line_num}: {details}")
+                    print(f"   → {line_text}")
+                print()
+            
+            if outcome_conflicts:
+                print(f"⚠️  Outcome Conflicts ({len(outcome_conflicts)} lines):")
+                for line_num, line_text, match_id, details in outcome_conflicts:
+                    print(f"   Line {line_num}: {details}")
+                    print(f"   → {line_text}")
+                print(f"   Use --force to overwrite existing results\n")
+            
+            if invalid_lines:
+                print(f"❌ Invalid Format ({len(invalid_lines)} lines):")
+                for line_num, line_text, reason in invalid_lines:
+                    print(f"   Line {line_num}: {reason}")
+                    print(f"   → {line_text}")
+                print()
+            
+            # Show summary
+            total_errors = len(missing_matches) + len(team_id_mismatches) + len(outcome_conflicts) + len(invalid_lines)
+            total_success = len(results_map)
+            print(f"Summary: {total_success} valid, {total_errors} errors")
+            
+            # Generate annotated error file
+            error_file = args.file.replace('.txt', '_errors.txt')
+            if not error_file.endswith('_errors.txt'):
+                error_file = args.file + '_errors.txt'
+            
+            # Create error lookup for quick access
+            error_map = {}
+            for line_num, line_text, match_id in missing_matches:
+                error_map[line_num] = f"ERROR: Match {match_id} does not exist"
+            for line_num, line_text, match_id, details in team_id_mismatches:
+                error_map[line_num] = f"ERROR: {details}"
+            for line_num, line_text, match_id, details in outcome_conflicts:
+                error_map[line_num] = f"WARNING: {details}"
+            for line_num, line_text, reason in invalid_lines:
+                error_map[line_num] = f"ERROR: {reason}"
+            
+            # Write annotated file
+            with open(args.file, 'r') as f_in, open(error_file, 'w') as f_out:
+                f_out.write(f"# Annotated results file with errors highlighted\n")
+                f_out.write(f"# Original file: {args.file}\n")
+                f_out.write(f"# Fix the errors below and re-run: ./tournament_manager.py report {round_num} --file {error_file}\n")
+                f_out.write(f"#\n")
+                f_out.write(f"# Format: Round MatchID AffID NegID Outcome\n")
+                f_out.write(f"#\n\n")
+                
+                for line_num, line in enumerate(f_in, 1):
+                    stripped = line.strip()
+                    if line_num in error_map:
+                        # Put error comment on the same line as the data
+                        f_out.write(f"{stripped}  # <<< {error_map[line_num]}\n")
+                    else:
+                        f_out.write(line)
+            
+            print(f"\n📝 Annotated error file created: {error_file}")
+            print(f"   Fix the highlighted errors and run:")
+            print(f"   ./tournament_manager.py report {round_num} --file {error_file}")
+            
+            if outcome_conflicts and not (missing_matches or team_id_mismatches or invalid_lines):
+                # Only outcome conflicts - can be resolved with --force
+                pass
+            elif total_errors > 0:
+                print(f"\n❌ Skipping file import due to errors. Fix the issues above and try again.")
+                return
     
     # Mode 3: Interactive
     else:
@@ -356,17 +516,13 @@ def cmd_report(args):
         if match_id in results_map:
             p['result'] = results_map[match_id]
 
-    # Re-calculate all derived stats and persist atomically
-    _tournament_lock.acquire()
-    try:
-        recalculate_stats(data, teams, team_map)
-        # Update current round if completed
-        if all(p['result'] is not None for p in pairings) and data['current_round'] < round_num:
-            data['current_round'] = round_num
-            print(f"Round {round_num} completed.")
-        save_tournament(data, teams)
-    finally:
-        _tournament_lock.release()
+    # Re-calculate all derived stats
+    recalculate_stats(data, teams, team_map)
+    # Update current round if completed
+    if all(p['result'] is not None for p in pairings) and data['current_round'] < round_num:
+        data['current_round'] = round_num
+        print(f"Round {round_num} completed.")
+    save_tournament(data, teams)
     print("Results saved and stats updated.")
 
 def cmd_standings(args):

@@ -1,0 +1,268 @@
+# Tournament Manager
+
+A command-line tool for managing live Swiss-system tournaments with support for pairing generation, result reporting, and standings tracking.
+
+## Overview
+
+`tournament_manager.py` is a practical tournament management tool that maintains tournament state in a JSON file. Unlike the simulation scripts in this repository, this tool is designed for managing real tournaments with actual participants.
+
+## Quick Start
+
+```bash
+# Initialize a tournament with 8 teams and 5 rounds
+./tournament_manager.py init 8 5
+
+# Generate pairings for Round 1
+./tournament_manager.py pair 1
+
+# Report a single match result (Round 1, Match 1, Team 0 (Aff) vs Team 1 (Neg), Aff wins)
+# Note: Teams are numbered starting from 0
+# In each match, one team is Affirmative (Aff) and one is Negative (Neg)
+./tournament_manager.py report 1 1 0 1 A
+
+# View current standings
+./tournament_manager.py standings
+```
+
+## Commands
+
+### `init` - Initialize Tournament
+
+Create a new tournament with specified teams and rounds.
+
+```bash
+./tournament_manager.py init <num_teams> <num_rounds> [--names FILE] [--force]
+```
+
+**Arguments:**
+- `num_teams`: Number of teams in the tournament
+- `num_rounds`: Number of rounds to be played
+- `--names FILE`: Optional file containing team names (one per line)
+- `--force`: Overwrite existing tournament file
+
+**Example:**
+```bash
+# Create tournament with 16 teams and 6 rounds
+./tournament_manager.py init 16 6
+
+# Create tournament with custom team names
+./tournament_manager.py init 8 5 --names teams.txt
+```
+
+**Example teams.txt format:**
+```
+Harvard Debate Team
+Yale Debate Team
+Princeton Debate Team
+Stanford Debate Team
+MIT Debate Team
+Columbia Debate Team
+UChicago Debate Team
+Berkeley Debate Team
+```
+
+### `pair` - Generate Pairings
+
+Generate pairings for a specific round using Swiss pairing logic.
+
+```bash
+./tournament_manager.py pair <round_number>
+```
+
+**Rules:**
+- Round 1 must be paired first
+- Round 2 can be paired without Round 1 results
+- Round 3+ requires all previous round results to be complete
+- Cannot skip rounds (must pair sequentially)
+
+**Example:**
+```bash
+./tournament_manager.py pair 1
+./tournament_manager.py pair 2  # Allowed even if Round 1 incomplete
+./tournament_manager.py pair 3  # Requires Round 2 results
+```
+
+### `report` - Record Results
+
+Report match results for a round. Supports three modes: single match, file input, and interactive.
+
+#### Single Match Mode
+
+```bash
+./tournament_manager.py report <round> <match_id> <aff_id> <neg_id> <outcome> [--force]
+```
+
+**Arguments:**
+- `round`: Round number
+- `match_id`: Match ID (required)
+- `aff_id`: Affirmative team ID (optional, for consistency check)
+- `neg_id`: Negative team ID (optional, for consistency check)
+- `outcome`: Result - `A` (Aff wins) or `N` (Neg wins)
+- `--force`: Overwrite existing result
+
+**Example:**
+```bash
+# Report Match 1 result (Aff wins)
+./tournament_manager.py report 1 1 0 1 A
+
+# Overwrite existing result
+./tournament_manager.py report 1 1 0 1 N --force
+```
+
+#### File Input Mode
+
+```bash
+./tournament_manager.py report <round> --file RESULTS_FILE [--force]
+```
+
+**File Format:**
+```
+Round MatchID AffID NegID Outcome
+1 1 0 1 A
+1 2 2 3 N
+1 3 4 5 A
+```
+
+Each line contains:
+- `Round`: Round number
+- `MatchID`: Match ID from the pairing
+- `AffID`: Affirmative team ID (for consistency check)
+- `NegID`: Negative team ID (for consistency check)
+- `Outcome`: `A` (Aff wins) or `N` (Neg wins)
+
+**Example:**
+```bash
+./tournament_manager.py report 1 --file round1_results.txt
+```
+
+**Example round1_results.txt:**
+```
+# Example results file for Round 1
+# Format: Round MatchID AffID NegID Outcome
+# Outcome: A (Aff wins) or N (Neg wins)
+
+1 1 0 1 A
+1 2 2 3 N
+1 3 4 5 A
+1 4 6 7 N
+```
+
+#### Interactive Mode
+
+```bash
+./tournament_manager.py report <round>
+```
+
+Prompts for each match result interactively. Type `q` or `exit` to quit early.
+
+**Example:**
+```bash
+./tournament_manager.py report 1
+# Follow prompts to enter results for each match
+```
+
+### `standings` - View Standings
+
+Display current tournament standings sorted by score, Buchholz, and wins.
+
+```bash
+./tournament_manager.py standings
+```
+
+**Output:**
+```
+--- Current Standings ---
+Rank  Name                 Wins  Score  Buchholz
+--------------------------------------------------
+1     Team 1               3     3      5
+2     Team 2               2     2      4
+3     Team 3               2     2      3
+...
+```
+
+## Tournament State
+
+Tournament data is stored in `tournament.json` with the following structure:
+
+- **config**: Tournament settings (num_teams, num_rounds)
+- **current_round**: Last completed round number
+- **rounds**: Array of round data with pairings and results
+- **teams**: Team statistics (scores, wins, Buchholz, side history)
+
+## Features
+
+### Consistency Checks
+
+- **Match ID validation**: Ensures match exists in the specified round
+- **Team ID verification**: Optional checks that Aff/Neg IDs match stored pairings
+- **Result completeness**: Validates all previous round results before pairing new rounds
+
+### Thread-Safe Updates
+
+- Uses threading locks for safe concurrent access
+- Automatically recalculates all team statistics when results are updated
+- Supports force-overwriting results with proper stat recalculation
+
+### Swiss Pairing Logic
+
+- Pairs teams with similar records
+- Balances Aff/Neg sides
+- Uses Buchholz tiebreaker for standings
+- Avoids repeat matchups when possible
+
+## Workflow Example
+
+```bash
+# 1. Initialize tournament
+./tournament_manager.py init 8 4 --names teams.txt
+
+# 2. Pair Round 1
+./tournament_manager.py pair 1
+
+# 3. Report Round 1 results
+./tournament_manager.py report 1 --file round1.txt
+
+# 4. Check standings
+./tournament_manager.py standings
+
+# 5. Pair Round 2 (can do before Round 1 results if needed)
+./tournament_manager.py pair 2
+
+# 6. Report Round 2 results interactively
+./tournament_manager.py report 2
+
+# 7. Continue for remaining rounds...
+./tournament_manager.py pair 3
+./tournament_manager.py report 3 1 0 2 A
+./tournament_manager.py report 3 2 1 3 N
+# ... report remaining matches
+
+# 8. Final standings
+./tournament_manager.py standings
+```
+
+## Error Handling
+
+The tool provides clear error messages for common issues:
+
+- **Missing pairings**: "Error: Pairings for Round X have not been generated yet."
+- **Incomplete results**: Lists all unreported matches before blocking pairing
+- **ID mismatches**: "Error: Aff ID mismatch for Match X (expected Y, got Z)"
+- **Duplicate results**: "Error: Result for Match X already recorded. Use --force to overwrite."
+
+## Tips
+
+1. **Use Match IDs**: When reporting results, use match IDs as the primary identifier for simplicity
+2. **Batch reporting**: Use file input mode for efficient bulk result entry
+3. **Verify pairings**: Always check pairings before distributing to participants
+4. **Backup data**: Keep copies of `tournament.json` at key points
+5. **Force flag**: Use `--force` carefully when overwriting results - stats will be recalculated
+
+## Differences from Simulation Tools
+
+Unlike `swiss_sim.py` and other simulation scripts:
+- Manages real tournaments, not simulations
+- Stores persistent state in JSON
+- Supports interactive result entry
+- Provides consistency checks and validation
+- Designed for live tournament operations
