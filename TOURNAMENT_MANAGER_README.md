@@ -180,6 +180,77 @@ Rank  Name                 Wins  Score  Buchholz
 ...
 ```
 
+### `export` - Export Results and Pairings
+
+Export tournament data to files for backup, sharing, or editing.
+
+```bash
+./tournament_manager.py export [-o OUTPUT_FILE]
+```
+
+**Arguments:**
+- `-o, --output OUTPUT_FILE`: Output filename for results (default: `results_export.txt`)
+
+**Generated Files:**
+1. **Results file** (`OUTPUT_FILE`): Machine-readable format for re-importing
+2. **Pairings file** (`OUTPUT_FILE_pairings.txt`): Human-readable match list
+
+**Results File Format:**
+- Reported matches appear as active lines
+- Unreported matches appear as commented templates with team names
+- Can be edited and re-imported using `report --file`
+
+**Example:**
+```bash
+# Export current tournament state
+./tournament_manager.py export
+
+# Export to custom filename
+./tournament_manager.py export -o round3_backup.txt
+```
+
+**Example results_export.txt:**
+```
+# Exported results from tournament
+# Format: Round MatchID AffID NegID Outcome
+# Outcome: A (Aff wins) or N (Neg wins)
+# Uncomment and edit lines below to report results
+
+# Round 1
+1 1 0 2 A
+1 2 1 3 N
+
+# Round 2
+# 2 3 0 1 A_or_N  # Team 1 vs Team 2
+# 2 4 2 3 A_or_N  # Team 3 vs Team 4
+```
+
+**Example results_export_pairings.txt:**
+```
+# Tournament Pairings
+# Format: Round MatchID | Aff Team vs Neg Team | Result
+
+======================================================================
+Round 1
+======================================================================
+
+Match  1 | Team 1               (Aff) vs Team 3               (Neg) | Winner: A
+Match  2 | Team 2               (Aff) vs Team 4               (Neg) | Winner: N
+
+======================================================================
+Round 2
+======================================================================
+
+Match  3 | Team 1               (Aff) vs Team 2               (Neg) | Not reported
+Match  4 | Team 4               (Aff) vs Team 3               (Neg) | Not reported
+```
+
+**Use Cases:**
+- **Backup**: Save tournament state at key points
+- **Sharing**: Distribute pairings to participants
+- **Editing**: Use results file as template for entering results
+- **Re-import**: Results file can be edited and re-imported idempotently
+
 ## Tournament State
 
 Tournament data is stored in `tournament.json` with the following structure:
@@ -219,26 +290,33 @@ Tournament data is stored in `tournament.json` with the following structure:
 # 2. Pair Round 1
 ./tournament_manager.py pair 1
 
-# 3. Report Round 1 results
+# 3. Export pairings for distribution
+./tournament_manager.py export -o round1.txt
+# Distribute round1_pairings.txt to participants
+
+# 4. Report Round 1 results
 ./tournament_manager.py report 1 --file round1.txt
 
-# 4. Check standings
+# 5. Check standings
 ./tournament_manager.py standings
 
-# 5. Pair Round 2 (can do before Round 1 results if needed)
+# 6. Pair Round 2 (can do before Round 1 results if needed)
 ./tournament_manager.py pair 2
 
-# 6. Report Round 2 results interactively
+# 7. Report Round 2 results interactively
 ./tournament_manager.py report 2
 
-# 7. Continue for remaining rounds...
+# 8. Continue for remaining rounds...
 ./tournament_manager.py pair 3
 ./tournament_manager.py report 3 1 0 2 A
 ./tournament_manager.py report 3 2 1 3 N
 # ... report remaining matches
 
-# 8. Final standings
+# 9. Final standings
 ./tournament_manager.py standings
+
+# 10. Export final results for records
+./tournament_manager.py export -o final_results.txt
 ```
 
 ## Error Handling

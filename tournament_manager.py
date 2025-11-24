@@ -477,11 +477,6 @@ def cmd_report(args):
             print("You must complete previous rounds before reporting results for Round {round_num}.")
             sys.exit(1)
 
-    # Check if results already reported for the current round
-    current_round_matches = [m for m in matches if m['round_num'] == round_num]
-    if all(m['result'] is not None for m in current_round_matches) and not args.force:
-        print(f"Results for Round {round_num} already complete. Use --force to overwrite.")
-        sys.exit(1)
 
     print(f"Reporting results for Round {round_num}...")
     
@@ -525,6 +520,82 @@ def cmd_standings(args):
     for i, t in enumerate(teams):
         print(f"{i+1:<5} {t.name:<20} {t.wins:<5} {t.score:<6} {t.buchholz:<8}")
 
+def cmd_export(args):
+    data, teams = load_tournament()
+    
+    matches = data.get('matches', [])
+    
+    if not matches:
+        print("No matches to export.")
+        return
+    
+    # Filter to only matches with results
+    reported_matches = [m for m in matches if m['result'] is not None]
+    
+    # Sort by round for cleaner output
+    reported_matches.sort(key=lambda m: (m['round_num'], m['match_id']))
+    
+    # Export results file (only if there are results)
+    output_file = args.output if args.output else "results_export.txt"
+    
+    # Always create results file (even if no results yet) to serve as template
+    with open(output_file, 'w') as f:
+        f.write("# Exported results from tournament\n")
+        f.write("# Format: Round MatchID AffID NegID Outcome\n")
+        f.write("# Outcome: A (Aff wins) or N (Neg wins)\n")
+        f.write("# Uncomment and edit lines below to report results\n\n")
+        
+        all_matches_sorted = sorted(matches, key=lambda m: (m['round_num'], m['match_id']))
+        
+        current_round = None
+        for m in all_matches_sorted:
+            if current_round != m['round_num']:
+                current_round = m['round_num']
+                f.write(f"\n# Round {current_round}\n")
+            
+            if m['result']:
+                # Already reported - write as active line
+                f.write(f"{m['round_num']} {m['match_id']} {m['aff_id']} {m['neg_id']} {m['result']}\n")
+            else:
+                # Not reported - write as commented template
+                f.write(f"# {m['round_num']} {m['match_id']} {m['aff_id']} {m['neg_id']} A_or_N  # {m['aff_name']} vs {m['neg_name']}\n")
+    
+    if reported_matches:
+        print(f"Exported {len(reported_matches)} results to {output_file}")
+    else:
+        print(f"Created results template in {output_file} (no results reported yet)")
+    
+    if len(matches) > len(reported_matches):
+        unreported_count = len(matches) - len(reported_matches)
+        print(f"  ({unreported_count} unreported match{'es' if unreported_count != 1 else ''} included as commented templates)")
+    
+    # Export pairings file (all matches, not just reported)
+    all_matches = sorted(matches, key=lambda m: (m['round_num'], m['match_id']))
+    
+    pairings_file = output_file.replace('.txt', '_pairings.txt')
+    if not pairings_file.endswith('_pairings.txt'):
+        pairings_file = output_file.replace('.txt', '') + '_pairings.txt'
+    
+    with open(pairings_file, 'w') as f:
+        f.write("# Tournament Pairings\n")
+        f.write("# Format: Round MatchID | Aff Team vs Neg Team | Result\n\n")
+        
+        current_round = None
+        for m in all_matches:
+            if current_round != m['round_num']:
+                current_round = m['round_num']
+                f.write(f"\n{'='*70}\n")
+                f.write(f"Round {current_round}\n")
+                f.write(f"{'='*70}\n\n")
+            
+            if m['result']:
+                result_str = f"Winner: {m['result']}"
+            else:
+                result_str = "Not reported"
+            f.write(f"Match {m['match_id']:2d} | {m['aff_name']:20s} (Aff) vs {m['neg_name']:20s} (Neg) | {result_str}\n")
+    
+    print(f"Exported pairings to {pairings_file}")
+
 def main():
     parser = argparse.ArgumentParser(description="Swiss Tournament Manager")
     subparsers = parser.add_subparsers(dest="command", help="Subcommands")
@@ -553,6 +624,10 @@ def main():
     # Standings
     parser_standings = subparsers.add_parser("standings", help="Show standings")
     
+    # Export
+    parser_export = subparsers.add_parser("export", help="Export results to file")
+    parser_export.add_argument("--output", "-o", type=str, help="Output file (default: results_export.txt)")
+    
     args = parser.parse_args()
     
     if args.command == "init":
@@ -563,6 +638,8 @@ def main():
         cmd_report(args)
     elif args.command == "standings":
         cmd_standings(args)
+    elif args.command == "export":
+        cmd_export(args)
     else:
         parser.print_help()
 
