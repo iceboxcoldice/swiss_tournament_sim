@@ -2,7 +2,12 @@
 
 A collection of Python scripts to simulate **Policy Debate tournaments** using Swiss-system pairing rules. Policy Debate tournaments closely follow Swiss system conventions with additional side constraints (Affirmative/Negative) and specific pairing rules.
 
-## 🌐 Web Application
+## � Tournament Manager
+
+`tournament_manager.py` is a command‑line tool for running and managing real‑world tournaments. It lets you initialise a tournament, generate pairings round‑by‑round, record match results, and view current standings. Unlike the simulation scripts, this tool does **not** perform Monte‑Carlo simulations; it simply tracks the actual progress of a live tournament.
+
+
+## �🌐 Web Application
 
 **Try it online:** [https://iceboxcoldice.github.io/swiss_tournament_sim/](https://iceboxcoldice.github.io/swiss_tournament_sim/)
 

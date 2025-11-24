@@ -170,27 +170,102 @@ def cmd_report(args):
     
     # If file provided, read from file
     results_map = {}
-    if args.file:
+    
+    # Mode 1: Single match via CLI args
+    if args.aff_id is not None and args.neg_id is not None and args.result is not None:
+        aff_id = args.aff_id
+        neg_id = args.neg_id
+        winner = args.result.upper()
+        
+        # Find match
+        match = next((p for p in pairings if p['aff_id'] == aff_id and p['neg_id'] == neg_id), None)
+        if match:
+            if match['result'] and not args.force:
+                print(f"Error: Result for Match {match['match_id']} already recorded. Use --force to overwrite.")
+                return
+            results_map[match['match_id']] = winner
+            print(f"Recording result for Match {match['match_id']}: {match['aff_name']} vs {match['neg_name']} -> {winner}")
+        else:
+            print(f"Error: No match found for Aff {aff_id} vs Neg {neg_id} in Round {round_num}")
+            return
+
+    # Mode 2: File input
+    elif args.file:
         with open(args.file, 'r') as f:
             for line in f:
                 parts = line.strip().split()
-                if len(parts) >= 2:
-                    match_id = int(parts[0])
-                    winner = parts[1].upper() # 'A' (Aff) or 'N' (Neg) or 'Aff'/'Neg'
-                    results_map[match_id] = winner
+                # Expected format: Round AffID NegID Winner
+                # e.g. "1 2 6 A"
+                if len(parts) >= 4:
+                    try:
+                        r_num = int(parts[0])
+                        aff_id = int(parts[1])
+                        neg_id = int(parts[2])
+                        winner = parts[3].upper()
+                        
+                        if r_num != round_num:
+                            print(f"Skipping line (wrong round): {line.strip()}")
+                            continue
+                            
+                        # Find match with these teams
+                        match = next((p for p in pairings if p['aff_id'] == aff_id and p['neg_id'] == neg_id), None)
+                        if match:
+                            results_map[match['match_id']] = winner
+                        else:
+                            print(f"Error: No match found for Aff {aff_id} vs Neg {neg_id} in Round {round_num}")
+                    except ValueError:
+                        print(f"Skipping invalid line: {line.strip()}")
+                else:
+                    print(f"Skipping invalid format (need Round AffID NegID Winner): {line.strip()}")
+    
+    # Mode 3: Interactive
     else:
         # Interactive mode
-        print("Enter result for each match (A for Aff win, N for Neg win):")
+        print(f"Enter result for each match in Round {round_num}.")
+        print("Format: Winner (A/N). Type 'q' or 'exit' to quit.")
+        print("Consistency Check: You must confirm the match details.")
+        
+        pending_matches = [p for p in pairings if not p['result']]
+        print(f"\nPending matches: {len(pending_matches)}")
+        
+        if len(pending_matches) <= 10 and len(pending_matches) > 0:
+            print("Pending matches list:")
+            for p in pending_matches:
+                print(f"  Match {p['match_id']}: {p['aff_name']} (ID: {p['aff_id']}) vs {p['neg_name']} (ID: {p['neg_id']})")
+        
         for p in pairings:
             if p['result'] and not args.force:
                 continue
+            
+            # Skip if we already have a result in this session (though loop iterates pairings, results_map is for new ones)
+            if p['match_id'] in results_map:
+                continue
                 
             while True:
-                res = input(f"Match {p['match_id']} - {p['aff_name']} (Aff) vs {p['neg_name']} (Neg): ").strip().upper()
+                print(f"\nMatch {p['match_id']}: {p['aff_name']} (ID: {p['aff_id']}) vs {p['neg_name']} (ID: {p['neg_id']})")
+                confirm = input(f"Confirm match (Enter 'y' to proceed, 'q' to quit): ").strip().lower()
+                
+                if confirm in ['q', 'exit']:
+                    print("Exiting interactive mode.")
+                    # Process whatever we have collected so far
+                    break
+                
+                if confirm != 'y':
+                    print("Skipping match.")
+                    break
+                    
+                res = input(f"Winner (A for Aff, N for Neg): ").strip().upper()
+                if res in ['Q', 'EXIT']:
+                    print("Exiting interactive mode.")
+                    break
+                    
                 if res in ['A', 'N', 'AFF', 'NEG']:
                     results_map[p['match_id']] = res[0] # Store 'A' or 'N'
                     break
                 print("Invalid input. Enter 'A' or 'N'.")
+            
+            if confirm in ['q', 'exit']:
+                break
 
     # Process results
     for p in pairings:
@@ -309,7 +384,10 @@ def main():
     # Report
     parser_report = subparsers.add_parser("report", help="Report results")
     parser_report.add_argument("round", type=int, help="Round number")
-    parser_report.add_argument("--file", type=str, help="File with results (MatchID Winner)")
+    parser_report.add_argument("aff_id", type=int, nargs='?', help="Aff Team ID (optional)")
+    parser_report.add_argument("neg_id", type=int, nargs='?', help="Neg Team ID (optional)")
+    parser_report.add_argument("result", type=str, nargs='?', help="Result (A/N) (optional)")
+    parser_report.add_argument("--file", type=str, help="File with results (Round AffID NegID Winner)")
     parser_report.add_argument("--force", action="store_true", help="Overwrite existing results")
     
     # Standings
