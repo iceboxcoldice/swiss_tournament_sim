@@ -21,6 +21,7 @@ const mainTabs = document.getElementById('mainTabs');
 const tabContent = document.getElementById('tabContent');
 
 let activeTab = null;
+let navigationHistory = []; // Track navigation history for back button
 
 // Initialize UI
 function initUI() {
@@ -52,6 +53,12 @@ setupForm.addEventListener('submit', (e) => {
     const teamNames = teamNamesText.split('\n').map(n => n.trim()).filter(n => n);
 
     tournament.init(numTeams, numRounds, teamNames);
+
+    // Clear navigation history and hash for fresh start
+    navigationHistory = [];
+    window.location.hash = '';
+    activeTab = null;
+
     showDashboard();
 });
 
@@ -151,6 +158,12 @@ importFile.addEventListener('change', (e) => {
         try {
             const data = JSON.parse(event.target.result);
             tournament.importData(data);
+
+            // Clear navigation history and hash for fresh start
+            navigationHistory = [];
+            window.location.hash = '';
+            activeTab = null;
+
             showDashboard();
         } catch (error) {
             showNotification('Import Error', error.message);
@@ -281,6 +294,11 @@ function showRound(roundNum) {
     activeTab = `round${roundNum}`;
     window.location.hash = `round${roundNum}`;
 
+    // Add to navigation history (avoid duplicates of current view)
+    if (navigationHistory[navigationHistory.length - 1] !== activeTab) {
+        navigationHistory.push(activeTab);
+    }
+
     // Update active tab button
     const tabs = mainTabs.querySelectorAll('.tab-btn');
     tabs.forEach(btn => {
@@ -336,6 +354,11 @@ function showRound(roundNum) {
 function showStandings() {
     activeTab = 'standings';
     window.location.hash = 'standings';
+
+    // Add to navigation history (avoid duplicates of current view)
+    if (navigationHistory[navigationHistory.length - 1] !== activeTab) {
+        navigationHistory.push(activeTab);
+    }
 
     // Update active tab button
     const tabs = mainTabs.querySelectorAll('.tab-btn');
@@ -433,13 +456,13 @@ window.showTeamDetails = function (teamId, previousView = null) {
     const team = tournament.teams.find(t => t.id === teamId);
     if (!team) return;
 
-    // Store previous view if not provided (use current activeTab)
-    if (!previousView) {
-        previousView = activeTab || 'standings';
-    }
-
     activeTab = `team${teamId}`;
     window.location.hash = `team${teamId}`;
+
+    // Add to navigation history (avoid duplicates of current view)
+    if (navigationHistory[navigationHistory.length - 1] !== activeTab) {
+        navigationHistory.push(activeTab);
+    }
 
     // Update active tab button (clear all active states)
     const tabs = mainTabs.querySelectorAll('.tab-btn');
@@ -450,6 +473,9 @@ window.showTeamDetails = function (teamId, previousView = null) {
         m.aff_id === teamId || m.neg_id === teamId
     ).sort((a, b) => a.round_num - b.round_num);
 
+    // HEAD-TO-HEAD RECORDS SECTION (currently hidden from display)
+    // Uncomment this entire block to re-enable head-to-head records
+    /*
     // Calculate head-to-head records
     const h2hRecords = {};
     teamMatches.forEach(match => {
@@ -472,19 +498,43 @@ window.showTeamDetails = function (teamId, previousView = null) {
             }
         }
     });
+    */
 
-    // Determine back button action
-    let backAction = 'showStandings()';
-    let backLabel = '← Back to Standings';
+    // Determine back button action from navigation history
+    let backAction = 'goBack()';
+    let backLabel = '← Back';
 
-    if (previousView.startsWith('round')) {
-        const roundNum = parseInt(previousView.replace('round', ''));
-        backAction = `showRound(${roundNum})`;
-        backLabel = `← Back to Round ${roundNum}`;
-    } else if (previousView.startsWith('team')) {
-        const prevTeamId = parseInt(previousView.replace('team', ''));
-        backAction = `showTeamDetails(${prevTeamId}, '${activeTab}')`;
-        backLabel = '← Back';
+    // Find the previous view from history (skip current team page)
+    const currentIndex = navigationHistory.length - 1;
+    previousView = null;
+
+    for (let i = currentIndex - 1; i >= 0; i--) {
+        const historyItem = navigationHistory[i];
+        if (historyItem !== activeTab && !historyItem.startsWith('team')) {
+            previousView = historyItem;
+            break;
+        } else if (historyItem.startsWith('team') && historyItem !== activeTab) {
+            // Found a different team page
+            previousView = historyItem;
+            break;
+        }
+    }
+
+    // Set label based on previous view
+    if (previousView) {
+        if (previousView.startsWith('round')) {
+            const roundNum = parseInt(previousView.replace('round', ''));
+            backLabel = `← Back to Round ${roundNum}`;
+        } else if (previousView === 'standings') {
+            backLabel = '← Back to Standings';
+        } else if (previousView.startsWith('team')) {
+            const prevTeamId = parseInt(previousView.replace('team', ''));
+            const prevTeam = tournament.teams.find(t => t.id === prevTeamId);
+            backLabel = prevTeam ? `← Back to ${prevTeam.name}` : '← Back';
+        }
+    } else {
+        // No previous view found, default to standings
+        backLabel = '← Back to Standings';
     }
 
     tabContent.innerHTML = `
@@ -542,7 +592,7 @@ window.showTeamDetails = function (teamId, previousView = null) {
                             <tr>
                                 <td>Round ${match.round_num}</td>
                                 <td>${side}</td>
-                                <td><a href="#" onclick="showTeamDetails(${oppId}, 'team${teamId}'); return false;" class="team-link">${oppName}</a></td>
+                                <td><a href="#" onclick="showTeamDetails(${oppId}); return false;" class="team-link">${oppName}</a></td>
                                 <td class="${resultClass}">${result}</td>
                             </tr>
                         `;
@@ -550,6 +600,7 @@ window.showTeamDetails = function (teamId, previousView = null) {
                 </tbody>
             </table>
 
+            <!-- HEAD-TO-HEAD RECORDS DISPLAY (currently hidden)
             <h4 style="margin-top: 2rem; margin-bottom: 1rem;">Head-to-Head Records</h4>
             <table class="standings-table">
                 <thead>
@@ -563,7 +614,7 @@ window.showTeamDetails = function (teamId, previousView = null) {
                 <tbody>
                     ${Object.entries(h2hRecords).map(([oppId, record]) => `
                         <tr>
-                            <td><a href="#" onclick="showTeamDetails(${oppId}, 'team${teamId}'); return false;" class="team-link">${record.name}</a></td>
+                            <td><a href="#" onclick="showTeamDetails(${oppId}); return false;" class="team-link">${record.name}</a></td>
                             <td>${record.wins}</td>
                             <td>${record.losses}</td>
                             <td>${record.pending}</td>
@@ -571,8 +622,41 @@ window.showTeamDetails = function (teamId, previousView = null) {
                     `).join('')}
                 </tbody>
             </table>
+            -->
+
         </div>
     `;
+};
+
+// Go back to previous view
+window.goBack = function () {
+    // Remove current view from history
+    navigationHistory.pop();
+
+    // Find the previous non-team view or a different team view
+    let previousView = null;
+    while (navigationHistory.length > 0) {
+        const historyItem = navigationHistory.pop();
+        if (historyItem !== activeTab) {
+            previousView = historyItem;
+            break;
+        }
+    }
+
+    // Navigate to previous view or default to standings
+    if (previousView) {
+        if (previousView.startsWith('round')) {
+            const roundNum = parseInt(previousView.replace('round', ''));
+            showRound(roundNum);
+        } else if (previousView === 'standings') {
+            showStandings();
+        } else if (previousView.startsWith('team')) {
+            const teamId = parseInt(previousView.replace('team', ''));
+            showTeamDetails(teamId);
+        }
+    } else {
+        showStandings();
+    }
 };
 
 // Handle browser back/forward navigation
