@@ -147,6 +147,26 @@ Each line contains:
 1 4 6 7 N
 ```
 
+**Using 'all' as Round Specifier:**
+
+You can use `all` instead of a round number to process results from all rounds in the file:
+
+```bash
+# Process results from all rounds in the file
+./tournament_manager.py report all --file all_results.txt
+```
+
+This is useful when:
+- Importing results from multiple rounds at once
+- Re-importing exported results after `reinit`
+- Batch updating results across rounds
+
+**Note:** The `all` specifier:
+- Only works with `--file` mode
+- Processes all rounds found in the file
+- Updates `current_round` to the highest fully complete round
+- Does not require previous rounds to be complete (similar to `--force`)
+
 #### Interactive Mode
 
 ```bash

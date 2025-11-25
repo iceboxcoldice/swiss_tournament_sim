@@ -462,11 +462,24 @@ def _handle_interactive_report(matches, force, round_num) -> bool:
 
 def cmd_report(args):
     data, teams = load_tournament()
-    round_num = args.round
     
-    if round_num > len(data['rounds']):
-        print(f"Error: Round {round_num} does not exist.")
-        sys.exit(1)
+    # Handle 'all' as special round specifier for file mode
+    if isinstance(args.round, str) and args.round.lower() == 'all':
+        if not args.file:
+            print("Error: 'all' round specifier is only valid with --file mode.")
+            sys.exit(1)
+        round_num = 'all'
+    else:
+        # Convert to int if it's a string number
+        try:
+            round_num = int(args.round)
+        except ValueError:
+            print(f"Error: Invalid round specifier '{args.round}'. Use a number or 'all' (with --file).")
+            sys.exit(1)
+            
+        if round_num > len(data['rounds']):
+            print(f"Error: Round {round_num} does not exist.")
+            sys.exit(1)
 
     matches = data.get('matches', [])
     
@@ -476,19 +489,24 @@ def cmd_report(args):
     # Let's make it a strict check unless force is used, or maybe always strict?
     # "maybe add a check" implies we should check.
     
-    for r in range(1, round_num):
-        # Find matches for round r
-        prev_round_matches = [m for m in matches if m['round_num'] == r]
-        unreported = [m for m in prev_round_matches if m['result'] is None]
-        
-        if unreported:
-            print(f"Error: Round {r} is not fully reported.")
-            print(f"Unreported matches in Round {r}: {', '.join(str(m['match_id']) for m in unreported)}")
-            print("You must complete previous rounds before reporting results for Round {round_num}.")
-            sys.exit(1)
+    # Validate previous rounds (skip if round_num is 'all')
+    if round_num != 'all':
+        for r in range(1, round_num):
+            # Find matches for round r
+            prev_round_matches = [m for m in matches if m['round_num'] == r]
+            unreported = [m for m in prev_round_matches if m['result'] is None]
+            
+            if unreported:
+                print(f"Error: Round {r} is not fully reported.")
+                print(f"Unreported matches in Round {r}: {', '.join(str(m['match_id']) for m in unreported)}")
+                print(f"You must complete previous rounds before reporting results for Round {round_num}.")
+                sys.exit(1)
 
 
-    print(f"Reporting results for Round {round_num}...")
+    if round_num == 'all':
+        print(f"Reporting results for all rounds...")
+    else:
+        print(f"Reporting results for Round {round_num}...")
     
     # Map team IDs to Team objects for easy update
     team_map = {t.id: t for t in teams}
@@ -509,11 +527,21 @@ def cmd_report(args):
     # Re-calculate all derived stats
     recalculate_stats(data, teams, team_map)
     
-    # Update current round if completed
-    current_round_matches = [m for m in matches if m['round_num'] == round_num]
-    if all(m['result'] is not None for m in current_round_matches) and data['current_round'] < round_num:
-        data['current_round'] = round_num
-        print(f"Round {round_num} completed.")
+    # Update current round if completed (skip for 'all' mode)
+    if round_num != 'all':
+        current_round_matches = [m for m in matches if m['round_num'] == round_num]
+        if all(m['result'] is not None for m in current_round_matches) and data['current_round'] < round_num:
+            data['current_round'] = round_num
+            print(f"Round {round_num} completed.")
+    else:
+        # For 'all' mode, update current_round to highest complete round
+        for r in range(1, len(data['rounds']) + 1):
+            round_matches = [m for m in matches if m['round_num'] == r]
+            if all(m['result'] is not None for m in round_matches):
+                data['current_round'] = r
+            else:
+                break
+    
     save_tournament(data, teams)
     print("Results saved and stats updated.")
 
@@ -813,7 +841,7 @@ def main():
     
     # Report
     parser_report = subparsers.add_parser("report", help="Report results")
-    parser_report.add_argument("round", type=int, help="Round number")
+    parser_report.add_argument("round", help="Round number (or 'all' for file mode to process all rounds)")
     parser_report.add_argument("match_id", type=int, nargs='?', help="Match ID (optional)")
     parser_report.add_argument("aff_id", type=int, nargs='?', help="Affirmative team ID (optional)")
     parser_report.add_argument("neg_id", type=int, nargs='?', help="Negative team ID (optional)")
