@@ -39,7 +39,9 @@ class TournamentManager {
             current_round: 0,
             rounds: Array.from({ length: numRounds }, (_, i) => ({ round_num: i + 1 })),
             matches: [],
-            next_match_id: 1
+            next_match_id: 1,
+            pairing_file_content: "# Format: Round MatchID AffID NegID\n",
+            result_file_content: "# Format: Round MatchID AffID NegID Outcome\n"
         };
 
         this.saveToStorage();
@@ -67,6 +69,7 @@ class TournamentManager {
         const pairs = this.generateSwissPairings(roundNum);
 
         // Create match objects
+        const newMatches = [];
         for (const [aff, neg] of pairs) {
             const match = {
                 match_id: this.data.next_match_id++,
@@ -78,6 +81,12 @@ class TournamentManager {
                 result: null
             };
             this.data.matches.push(match);
+            newMatches.push(match);
+        }
+
+        // Update pairing file content
+        for (const m of newMatches) {
+            this.data.pairing_file_content += `${m.round_num} ${m.match_id} ${m.aff_id} ${m.neg_id}\n`;
         }
 
         this.saveToStorage();
@@ -268,6 +277,10 @@ class TournamentManager {
         }
 
         match.result = outcome;
+
+        // Update result file content
+        this.data.result_file_content += `${match.round_num} ${match.match_id} ${match.aff_id} ${match.neg_id} ${outcome}\n`;
+
         this.recalculateStats();
         this.saveToStorage();
     }
@@ -284,6 +297,31 @@ class TournamentManager {
         }
 
         match.result = newOutcome;
+
+        // Update result file content: Comment out old lines for this match
+        const lines = this.data.result_file_content.split('\n');
+        const newLines = lines.map(line => {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) return line; // Already comment or empty
+
+            const parts = trimmed.split(/\s+/);
+            if (parts.length >= 2) {
+                const mid = Number(parts[1]);
+                if (mid === matchId) {
+                    return `# ${line} # Updated/Corrected`; // Comment out
+                }
+            }
+            return line;
+        });
+
+        this.data.result_file_content = newLines.join('\n');
+
+        // Append new result if exists
+        if (newOutcome !== null) {
+            if (!this.data.result_file_content.endsWith('\n')) this.data.result_file_content += '\n';
+            this.data.result_file_content += `${match.round_num} ${match.match_id} ${match.aff_id} ${match.neg_id} ${newOutcome}\n`;
+        }
+
         this.recalculateStats();
         this.saveToStorage();
     }
@@ -364,6 +402,10 @@ class TournamentManager {
 
     // Export tournament data
     exportData() {
+        // Ensure content exists (migration)
+        if (!this.data.pairing_file_content) this.data.pairing_file_content = this.generatePairingFileContent();
+        if (!this.data.result_file_content) this.data.result_file_content = this.generateResultFileContent();
+
         return {
             ...this.data,
             teams: this.teams.map(t => ({
@@ -384,6 +426,15 @@ class TournamentManager {
     // Import tournament data
     importData(data) {
         this.data = data;
+
+        // Migration: Generate if missing
+        if (!this.data.pairing_file_content) this.data.pairing_file_content = this.generatePairingFileContent();
+        if (!this.data.result_file_content) this.data.result_file_content = this.generateResultFileContent();
+
+        // Validate redundancy
+        this.validatePairingRedundancy(this.data.matches, this.data.pairing_file_content);
+        this.validateResultRedundancy(this.data.matches, this.data.result_file_content);
+
         this.teams = data.teams.map(t => {
             const team = new Team(t.id, t.name);
             team.wins = t.wins;
@@ -401,8 +452,21 @@ class TournamentManager {
 
     // LocalStorage persistence
     saveToStorage() {
+        this.checkConsistency();
         const data = this.exportData();
         localStorage.setItem('tournament_data', JSON.stringify(data));
+    }
+
+    // Check consistency between JSON data and redundant file content
+    checkConsistency() {
+        if (this.data) {
+            // Ensure fields exist
+            if (!this.data.pairing_file_content) this.data.pairing_file_content = this.generatePairingFileContent();
+            if (!this.data.result_file_content) this.data.result_file_content = this.generateResultFileContent();
+
+            this.validatePairingRedundancy(this.data.matches, this.data.pairing_file_content);
+            this.validateResultRedundancy(this.data.matches, this.data.result_file_content);
+        }
     }
 
     loadFromStorage() {
@@ -423,6 +487,74 @@ class TournamentManager {
         this.teams = [];
     }
 
+    // Generate pairing file content
+    generatePairingFileContent() {
+        let content = "# Format: Round MatchID AffID NegID\n";
+        const sortedMatches = [...this.data.matches].sort((a, b) => a.match_id - b.match_id);
+        for (const m of sortedMatches) {
+            content += `${m.round_num} ${m.match_id} ${m.aff_id} ${m.neg_id}\n`;
+        }
+        return content;
+    }
+
+    // Generate result file content
+    generateResultFileContent() {
+        let content = "# Format: Round MatchID AffID NegID Outcome\n";
+        const sortedMatches = [...this.data.matches].sort((a, b) => a.match_id - b.match_id);
+        for (const m of sortedMatches) {
+            if (m.result !== null) {
+                content += `${m.round_num} ${m.match_id} ${m.aff_id} ${m.neg_id} ${m.result}\n`;
+            }
+        }
+        return content;
+    }
+
+    // Validate pairing redundancy
+    validatePairingRedundancy(matches, content) {
+        const lines = content.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+        if (lines.length !== matches.length) {
+            throw new Error(`Redundancy check failed: Pairing file has ${lines.length} matches, JSON has ${matches.length}`);
+        }
+        for (const line of lines) {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length < 4) continue;
+            const [r, mid, aff, neg] = parts.map(Number);
+
+            const match = matches.find(m => m.match_id === mid);
+            if (!match) throw new Error(`Redundancy check failed: Match ${mid} in pairing file not found in JSON`);
+            if (match.round_num !== r) throw new Error(`Redundancy check failed: Match ${mid} round mismatch (File: ${r}, JSON: ${match.round_num})`);
+            if (match.aff_id !== aff) throw new Error(`Redundancy check failed: Match ${mid} Aff ID mismatch (File: ${aff}, JSON: ${match.aff_id})`);
+            if (match.neg_id !== neg) throw new Error(`Redundancy check failed: Match ${mid} Neg ID mismatch (File: ${neg}, JSON: ${match.neg_id})`);
+        }
+    }
+
+    // Validate result redundancy
+    validateResultRedundancy(matches, content) {
+        const lines = content.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+        const matchesWithResults = matches.filter(m => m.result !== null);
+
+        if (lines.length !== matchesWithResults.length) {
+            throw new Error(`Redundancy check failed: Result file has ${lines.length} results, JSON has ${matchesWithResults.length}`);
+        }
+
+        for (const line of lines) {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length < 5) continue;
+            const r = Number(parts[0]);
+            const mid = Number(parts[1]);
+            const aff = Number(parts[2]);
+            const neg = Number(parts[3]);
+            const outcome = parts[4];
+
+            const match = matches.find(m => m.match_id === mid);
+            if (!match) throw new Error(`Redundancy check failed: Match ${mid} in result file not found in JSON`);
+            if (match.round_num !== r) throw new Error(`Redundancy check failed: Match ${mid} round mismatch`);
+            if (match.aff_id !== aff) throw new Error(`Redundancy check failed: Match ${mid} Aff ID mismatch`);
+            if (match.neg_id !== neg) throw new Error(`Redundancy check failed: Match ${mid} Neg ID mismatch`);
+            if (match.result !== outcome) throw new Error(`Redundancy check failed: Match ${mid} outcome mismatch (File: ${outcome}, JSON: ${match.result})`);
+        }
+    }
+
     // Utility: Shuffle array
     shuffleArray(array) {
         for (let i = array.length - 1; i > 0; i--) {
@@ -430,4 +562,9 @@ class TournamentManager {
             [array[i], array[j]] = [array[j], array[i]];
         }
     }
+}
+
+// Export for Node.js environment
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { TournamentManager, Team };
 }
