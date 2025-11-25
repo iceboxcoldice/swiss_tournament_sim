@@ -369,6 +369,7 @@ Tournament data is stored in `tournament.json` with the following structure:
 - **Match ID validation**: Ensures match exists in the specified round
 - **Team ID verification**: Optional checks that Aff/Neg IDs match stored pairings
 - **Result completeness**: Validates all previous round results before pairing new rounds
+- **Redundant State Verification**: Maintains a parallel text-based record of pairings and results within the tournament state and validates it against the active data structure after every update (pairing, reporting, correction) to prevent data corruption.
 
 ### Thread-Safe Updates
 
