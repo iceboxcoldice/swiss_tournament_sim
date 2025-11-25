@@ -282,8 +282,9 @@ function handleNewRound() {
 
     try {
         tournament.pairRound(nextRound);
-        activeTab = `round${nextRound}`; // Focus on newly created round
+        // Refresh UI tabs and then focus on the newly created round
         updateDashboard();
+        showRound(nextRound);
     } catch (error) {
         showNotification('Error', error.message);
     }
