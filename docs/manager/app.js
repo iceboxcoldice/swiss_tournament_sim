@@ -474,40 +474,13 @@ window.showTeamDetails = function (teamId, previousView = null) {
         m.aff_id === teamId || m.neg_id === teamId
     ).sort((a, b) => a.round_num - b.round_num);
 
-    // HEAD-TO-HEAD RECORDS SECTION (currently hidden from display)
-    // Uncomment this entire block to re-enable head-to-head records
-    /*
-    // Calculate head-to-head records
-    const h2hRecords = {};
-    teamMatches.forEach(match => {
-        const isAff = match.aff_id === teamId;
-        const oppId = isAff ? match.neg_id : match.aff_id;
-        const oppName = isAff ? match.neg_name : match.aff_name;
-
-        if (!h2hRecords[oppId]) {
-            h2hRecords[oppId] = { name: oppName, wins: 0, losses: 0, pending: 0 };
-        }
-
-        if (match.result === null) {
-            h2hRecords[oppId].pending++;
-        } else {
-            const won = (isAff && match.result === 'A') || (!isAff && match.result === 'N');
-            if (won) {
-                h2hRecords[oppId].wins++;
-            } else {
-                h2hRecords[oppId].losses++;
-            }
-        }
-    });
-    */
-
     // Determine back button action from navigation history
     let backAction = 'goBack()';
     let backLabel = '← Back';
 
     // Find the previous view from history (skip current team page)
     const currentIndex = navigationHistory.length - 1;
-    previousView = null;
+    // let previousView = null;
 
     for (let i = currentIndex - 1; i >= 0; i--) {
         const historyItem = navigationHistory[i];
@@ -600,31 +573,6 @@ window.showTeamDetails = function (teamId, previousView = null) {
     }).join('')}
                 </tbody>
             </table>
-
-            <!-- HEAD-TO-HEAD RECORDS DISPLAY (currently hidden)
-            <h4 style="margin-top: 2rem; margin-bottom: 1rem;">Head-to-Head Records</h4>
-            <table class="standings-table">
-                <thead>
-                    <tr>
-                        <th>Opponent</th>
-                        <th>Wins</th>
-                        <th>Losses</th>
-                        <th>Pending</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${Object.entries(h2hRecords).map(([oppId, record]) => `
-                        <tr>
-                            <td><a href="#" onclick="showTeamDetails(${oppId}); return false;" class="team-link">${record.name}</a></td>
-                            <td>${record.wins}</td>
-                            <td>${record.losses}</td>
-                            <td>${record.pending}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-            -->
-
         </div>
     `;
 };
