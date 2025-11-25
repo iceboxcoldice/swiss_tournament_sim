@@ -55,18 +55,50 @@ setupForm.addEventListener('submit', (e) => {
     showDashboard();
 });
 
-// Reset Tournament Handler
-resetBtn.addEventListener('click', () => {
+// Generic Confirmation Modal
+// confirmModal, cancelResetBtn, confirmResetBtn are already declared at the top
+
+let onConfirmCallback = null;
+
+function showConfirm(title, message, callback) {
+    // Update modal content (assuming simple structure for now, might need HTML update)
+    // For now, we'll just use the existing modal structure but repurpose it.
+    // Ideally, index.html should be updated to have generic IDs, but we can map them here.
+
+    // Check if we need to update HTML structure first. 
+    // The current HTML structure for confirmModal is likely specific to Reset.
+    // Let's assume we will update index.html to make it generic.
+
+    document.getElementById('confirmModalTitle').textContent = title;
+    document.getElementById('confirmModalMessage').textContent = message;
+
+    onConfirmCallback = callback;
     confirmModal.classList.remove('hidden');
-});
+}
 
 cancelResetBtn.addEventListener('click', () => {
     confirmModal.classList.add('hidden');
+    onConfirmCallback = null;
 });
 
 confirmResetBtn.addEventListener('click', () => {
-    tournament.clearStorage();
-    location.reload();
+    confirmModal.classList.add('hidden');
+    if (onConfirmCallback) {
+        onConfirmCallback();
+        onConfirmCallback = null;
+    }
+});
+
+// Reset Tournament Handler
+resetBtn.addEventListener('click', () => {
+    showConfirm(
+        'Reset Tournament',
+        'Are you sure you want to reset the tournament? This cannot be undone.',
+        () => {
+            tournament.clearStorage();
+            location.reload();
+        }
+    );
 });
 
 // Close modal when clicking outside
@@ -171,6 +203,19 @@ function renderTabs() {
     mainTabs.appendChild(standingsBtn);
 
     // Show appropriate tab
+    if (activeTab && activeTab.startsWith('round')) {
+        const roundNum = parseInt(activeTab.replace('round', ''));
+        // Verify round still exists (it should)
+        if (roundNum <= maxPairedRound) {
+            showRound(roundNum);
+            return;
+        }
+    } else if (activeTab === 'standings') {
+        showStandings();
+        return;
+    }
+
+    // Default behavior (initial load or invalid state)
     if (maxPairedRound > 0) {
         showRound(maxPairedRound);
     } else {
@@ -180,8 +225,10 @@ function renderTabs() {
 
 // Handle New Round Button
 function handleNewRound() {
-    const { current_round, config } = tournament.data;
-    const nextRound = current_round + 1;
+    // Calculate next round based on existing matches
+    const { config } = tournament.data;
+    const maxRound = tournament.data.matches.reduce((max, m) => Math.max(max, m.round_num), 0);
+    const nextRound = maxRound + 1;
 
     // Check if we can pair
     if (nextRound > config.num_rounds) {
@@ -189,8 +236,8 @@ function handleNewRound() {
         return;
     }
 
-    // Check if previous round is complete (for all next rounds > 1)
-    if (nextRound > 1) {
+    // Check if previous round is complete (except Round 2)
+    if (nextRound > 2) {
         const prevRound = nextRound - 1;
         const prevMatches = tournament.data.matches.filter(m => m.round_num === prevRound);
         if (prevMatches.some(m => m.result === null)) {
@@ -201,6 +248,7 @@ function handleNewRound() {
 
     try {
         tournament.pairRound(nextRound);
+        activeTab = `round${nextRound}`; // Focus on newly created round
         updateDashboard();
     } catch (error) {
         showNotification('Error', error.message);
@@ -246,7 +294,13 @@ function showRound(roundNum) {
                                         <button class="btn btn-success" onclick="reportResult(${m.match_id}, 'N')">Neg Wins</button>
                                     </div>
                                 ` : `
-                                    <div class="result-status">Winner: ${winner}</div>
+                                    <div class="result-status">
+                                        Winner: ${m.result === 'A' ? 'Aff' : 'Neg'}
+                                        <div class="correction-buttons">
+                                            <button class="btn btn-sm btn-warning" onclick="correctResult(${m.match_id}, '${m.result}')" title="Switch Winner">⇄</button>
+                                            <button class="btn btn-sm btn-danger" onclick="unsubmitResult(${m.match_id})" title="Unsubmit Result">✕</button>
+                                        </div>
+                                    </div>
                                 `}
                             </div>
                         </div>
@@ -313,16 +367,43 @@ function showStandings() {
 window.reportResult = function (matchId, outcome) {
     try {
         tournament.reportResult(matchId, outcome);
-        const match = tournament.data.matches.find(m => m.match_id === matchId);
         updateDashboard();
-        // Stay on current round view
-        if (activeTab && activeTab.startsWith('round')) {
-            const roundNum = parseInt(activeTab.replace('round', ''));
-            showRound(roundNum);
-        }
     } catch (error) {
         showNotification('Error', error.message);
     }
+};
+
+// Correct Result (Switch Winner)
+window.correctResult = function (matchId, currentResult) {
+    const newOutcome = currentResult === 'A' ? 'N' : 'A';
+    showConfirm(
+        'Switch Winner',
+        'Are you sure you want to switch the winner? This will update standings but preserve existing pairings.',
+        () => {
+            try {
+                tournament.updateResult(matchId, newOutcome);
+                updateDashboard();
+            } catch (error) {
+                showNotification('Error', error.message);
+            }
+        }
+    );
+};
+
+// Unsubmit Result
+window.unsubmitResult = function (matchId) {
+    showConfirm(
+        'Unsubmit Result',
+        'Are you sure you want to remove this result? This will update standings but preserve existing pairings.',
+        () => {
+            try {
+                tournament.updateResult(matchId, null);
+                updateDashboard();
+            } catch (error) {
+                showNotification('Error', error.message);
+            }
+        }
+    );
 };
 
 // Initialize on load

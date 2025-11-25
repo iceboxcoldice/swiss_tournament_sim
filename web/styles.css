@@ -435,3 +435,36 @@ header h1 {
     background: #059669;
     transform: translateY(-1px);
 }
+
+/* New Round Button */
+.new-round-btn {
+    font-weight: bold;
+    font-size: 1.2rem;
+    color: var(--success-color);
+}
+
+.new-round-btn:hover {
+    background-color: #e8f5e9;
+}
+
+/* Correction Buttons */
+.correction-buttons {
+    display: inline-flex;
+    gap: 5px;
+    margin-left: 10px;
+}
+
+.btn-sm {
+    padding: 2px 8px;
+    font-size: 0.8rem;
+    min-width: auto;
+}
+
+.btn-warning {
+    background-color: #ffc107;
+    color: #000;
+}
+
+.btn-warning:hover {
+    background-color: #e0a800;
+}

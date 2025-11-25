@@ -61,15 +61,14 @@
         </section>
     </div>
 
-    <!-- Confirmation Modal -->
+    <!-- Generic Confirmation Modal -->
     <div id="confirmModal" class="modal hidden">
         <div class="modal-content">
-            <h3>⚠️ Reset Tournament?</h3>
-            <p>Are you sure you want to reset the tournament? This action cannot be undone and all data will be lost.
-            </p>
+            <h3 id="confirmModalTitle">Confirm Action</h3>
+            <p id="confirmModalMessage">Are you sure you want to proceed?</p>
             <div class="modal-actions">
                 <button id="cancelResetBtn" class="btn btn-secondary">Cancel</button>
-                <button id="confirmResetBtn" class="btn btn-danger">Yes, Reset</button>
+                <button id="confirmResetBtn" class="btn btn-danger">Confirm</button>
             </div>
         </div>
     </div>

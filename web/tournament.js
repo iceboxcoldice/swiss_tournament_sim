@@ -11,6 +11,8 @@ class Team {
         this.opponents = [];
         this.aff_count = 0;
         this.neg_count = 0;
+        this.last_side = null;
+        this.side_history = {}; // opponentId -> list of sides ('Aff'/'Neg')
     }
 }
 
@@ -46,17 +48,15 @@ class TournamentManager {
 
     // Generate pairings for a round using Swiss system
     pairRound(roundNum) {
-        if (roundNum <= this.data.current_round + 1 && roundNum > 1) {
-            // Check if previous round is complete (except Round 2)
-            if (roundNum > 2) {
-                const prevRound = roundNum - 1;
-                const prevMatches = this.data.matches.filter(m => m.round_num === prevRound);
+        // Check if previous round is complete (except Round 2)
+        if (roundNum > 2) {
+            for (let r = 1; r < roundNum; r++) {
+                const prevMatches = this.data.matches.filter(m => m.round_num === r);
                 if (prevMatches.some(m => m.result === null)) {
-                    throw new Error(`Round ${prevRound} is not complete`);
+                    throw new Error(`Round ${r} is not complete`);
                 }
             }
         }
-
         // Check if round already paired
         const existingMatches = this.data.matches.filter(m => m.round_num === roundNum);
         if (existingMatches.length > 0) {
@@ -84,89 +84,172 @@ class TournamentManager {
         return pairs;
     }
 
-    // Swiss pairing algorithm
+    // Swiss pairing algorithm – mirrors the Python `pair_round` logic
     generateSwissPairings(roundNum) {
         const teams = [...this.teams];
 
-        if (roundNum === 1) {
-            // Random pairing for round 1
-            this.shuffleArray(teams);
-            const pairs = [];
+        // Update Buchholz before pairing (Python does this)
+        this.updateBuchholz();
 
-            // Handle odd number of teams (bye)
-            if (teams.length % 2 !== 0) {
-                const byeTeam = teams.pop(); // Last team gets a bye
-                // Note: Bye handling would need to be implemented in match creation
-                // For now, we just skip pairing this team
-            }
+        // Shuffle teams first to randomize order within groups
+        this.shuffleArray(teams);
 
-            for (let i = 0; i < teams.length; i += 2) {
-                pairs.push([teams[i], teams[i + 1]]);
+        // Group by score
+        const scoreGroups = {};
+        if (roundNum > 2) {
+            // Rounds 3+: Group teams by their current scores
+            for (const team of teams) {
+                const key = team.score;
+                if (!scoreGroups[key]) scoreGroups[key] = [];
+                scoreGroups[key].push(team);
             }
-            return pairs;
+        } else {
+            // Rounds 1-2: Don't consider scores, treat all teams as one group
+            scoreGroups[0] = teams;
         }
 
-        // Sort by score, then Buchholz
-        teams.sort((a, b) => {
-            if (b.score !== a.score) return b.score - a.score;
-            return b.buchholz - a.buchholz;
-        });
-
-        // Group by score brackets
-        const brackets = {};
-        for (const team of teams) {
-            const key = team.score;
-            if (!brackets[key]) brackets[key] = [];
-            brackets[key].push(team);
-        }
+        const sortedScores = Object.keys(scoreGroups).map(Number).sort((a, b) => b - a);
 
         const pairs = [];
-        const paired = new Set();
+        let floaters = [];
 
-        // Pair within brackets
-        for (const bracket of Object.values(brackets)) {
-            // Sort by side balance (prefer alternating sides)
-            bracket.sort((a, b) => {
-                const aDiff = Math.abs(a.aff_count - a.neg_count);
-                const bDiff = Math.abs(b.aff_count - b.neg_count);
-                return aDiff - bDiff;
-            });
+        // Process each score bracket from highest to lowest
+        for (const score of sortedScores) {
+            let group = scoreGroups[score];
+            // Add floaters from previous higher bracket
+            group = group.concat(floaters);
+            floaters = [];
 
-            for (let i = 0; i < bracket.length; i++) {
-                if (paired.has(bracket[i].id)) continue;
+            // Sort within bracket
+            if (roundNum > 2) {
+                // Rounds 3+: Sort by Buchholz descending
+                // Python: (score, buchholz, -true_rank).
+                group.sort((a, b) => {
+                    if (b.buchholz !== a.buchholz) return b.buchholz - a.buchholz;
+                    return a.id - b.id; // Stable tiebreaker
+                });
+            }
+            // Rounds 1-2: Keep shuffled order (random)
 
-                for (let j = i + 1; j < bracket.length; j++) {
-                    if (paired.has(bracket[j].id)) continue;
+            while (group.length > 0) {
+                const t1 = group.shift();
 
-                    const team1 = bracket[i];
-                    const team2 = bracket[j];
+                // Find best opponent
+                const { opponent, index, isSwappable } = this.findBestOpponent(t1, group);
 
-                    // Check if they've played before
-                    if (team1.opponents.includes(team2.id)) continue;
-
-                    // Determine sides based on balance
-                    let aff, neg;
-                    if (team1.aff_count < team1.neg_count) {
-                        aff = team1;
-                        neg = team2;
-                    } else if (team2.aff_count < team2.neg_count) {
-                        aff = team2;
-                        neg = team1;
-                    } else {
-                        // Equal balance, alternate
-                        aff = team1;
-                        neg = team2;
-                    }
-
+                if (opponent) {
+                    group.splice(index, 1);
+                    const [aff, neg] = this.determineSides(t1, opponent, isSwappable);
                     pairs.push([aff, neg]);
-                    paired.add(team1.id);
-                    paired.add(team2.id);
-                    break;
+                } else {
+                    // No opponent found, float this team
+                    floaters.push(t1);
                 }
             }
         }
 
+        // Handle remaining floaters
+        if (floaters.length > 0) {
+            while (floaters.length >= 2) {
+                const t1 = floaters.shift();
+                const t2 = floaters.shift();
+                const [aff, neg] = this.determineSides(t1, t2, false);
+                pairs.push([aff, neg]);
+            }
+            // If one team remains, give a bye
+            if (floaters.length === 1) {
+                const byeTeam = floaters[0];
+                byeTeam.score += 1;
+                byeTeam.opponents.push(-1);
+            }
+        }
+
         return pairs;
+    }
+
+    // Helper: Calculate side preference score
+    calculateSidePreference(team) {
+        let pref = team.neg_count - team.aff_count;
+        if (team.last_side === 'Neg') {
+            pref += 2.0;
+        } else if (team.last_side === 'Aff') {
+            pref -= 2.0;
+        }
+        return pref;
+    }
+
+    // Helper: Find best opponent
+    findBestOpponent(t1, group) {
+        let bestNonRepeat = null;
+        let bestNonRepeatIdx = -1;
+
+        let bestSwappable = null;
+        let bestSwappableIdx = -1;
+
+        for (let i = 0; i < group.length; i++) {
+            const candidate = group[i];
+
+            if (!t1.opponents.includes(candidate.id)) {
+                // Priority 1: Non-repeat
+                bestNonRepeat = candidate;
+                bestNonRepeatIdx = i;
+                break; // Strict Swiss: take first valid
+            } else {
+                // Check for swappable repeat
+                if (bestSwappable === null) {
+                    const t1History = t1.side_history[candidate.id] || [];
+                    const canPlayAff = !t1History.includes('Aff');
+                    const canPlayNeg = !t1History.includes('Neg');
+
+                    if (canPlayAff || canPlayNeg) {
+                        bestSwappable = candidate;
+                        bestSwappableIdx = i;
+                    }
+                }
+            }
+        }
+
+        if (bestNonRepeat) {
+            return { opponent: bestNonRepeat, index: bestNonRepeatIdx, isSwappable: false };
+        } else if (bestSwappable) {
+            return { opponent: bestSwappable, index: bestSwappableIdx, isSwappable: true };
+        }
+
+        return { opponent: null, index: -1, isSwappable: false };
+    }
+
+    // Helper: Determine sides
+    determineSides(t1, t2, isSwappable) {
+        if (isSwappable) {
+            // Force swap based on history
+            const t1History = t1.side_history[t2.id] || [];
+            const canPlayAff = !t1History.includes('Aff');
+            const canPlayNeg = !t1History.includes('Neg');
+
+            if (canPlayAff && !canPlayNeg) return [t1, t2];
+            if (canPlayNeg && !canPlayAff) return [t2, t1];
+        }
+
+        // Standard preference logic
+        const t1Pref = this.calculateSidePreference(t1);
+        const t2Pref = this.calculateSidePreference(t2);
+
+        if (t1Pref > t2Pref) return [t1, t2];
+        if (t2Pref > t1Pref) return [t2, t1];
+
+        // Random if equal
+        return Math.random() < 0.5 ? [t1, t2] : [t2, t1];
+    }
+
+    // Update Buchholz scores
+    updateBuchholz() {
+        for (const team of this.teams) {
+            team.buchholz = team.opponents.reduce((sum, oppId) => {
+                if (oppId === -1) return sum; // Ignore bye
+                const opp = this.teams.find(t => t.id === oppId);
+                return sum + (opp ? opp.score : 0);
+            }, 0);
+        }
     }
 
     // Report match result
@@ -189,6 +272,22 @@ class TournamentManager {
         this.saveToStorage();
     }
 
+    // Update match result (allows overwrite)
+    updateResult(matchId, newOutcome) {
+        const match = this.data.matches.find(m => m.match_id === matchId);
+        if (!match) {
+            throw new Error(`Match ${matchId} not found`);
+        }
+
+        if (newOutcome !== null && newOutcome !== 'A' && newOutcome !== 'N') {
+            throw new Error(`Invalid outcome: ${newOutcome}`);
+        }
+
+        match.result = newOutcome;
+        this.recalculateStats();
+        this.saveToStorage();
+    }
+
     // Recalculate all team statistics
     recalculateStats() {
         // Reset stats
@@ -199,10 +298,15 @@ class TournamentManager {
             team.opponents = [];
             team.aff_count = 0;
             team.neg_count = 0;
+            team.last_side = null;
+            team.side_history = {};
         }
 
         // Calculate from matches
-        for (const match of this.data.matches) {
+        // Sort matches by round to process in order (important for history)
+        const sortedMatches = [...this.data.matches].sort((a, b) => a.round_num - b.round_num);
+
+        for (const match of sortedMatches) {
             const affTeam = this.teams.find(t => t.id === match.aff_id);
             const negTeam = this.teams.find(t => t.id === match.neg_id);
 
@@ -210,6 +314,15 @@ class TournamentManager {
             negTeam.neg_count++;
             affTeam.opponents.push(negTeam.id);
             negTeam.opponents.push(affTeam.id);
+
+            affTeam.last_side = 'Aff';
+            negTeam.last_side = 'Neg';
+
+            if (!affTeam.side_history[negTeam.id]) affTeam.side_history[negTeam.id] = [];
+            affTeam.side_history[negTeam.id].push('Aff');
+
+            if (!negTeam.side_history[affTeam.id]) negTeam.side_history[affTeam.id] = [];
+            negTeam.side_history[affTeam.id].push('Neg');
 
             if (match.result === 'A') {
                 affTeam.wins++;
@@ -220,13 +333,7 @@ class TournamentManager {
             }
         }
 
-        // Calculate Buchholz (sum of opponents' scores)
-        for (const team of this.teams) {
-            team.buchholz = team.opponents.reduce((sum, oppId) => {
-                const opp = this.teams.find(t => t.id === oppId);
-                return sum + (opp ? opp.score : 0);
-            }, 0);
-        }
+        this.updateBuchholz();
 
         // Update current_round
         for (let r = 1; r <= this.data.config.num_rounds; r++) {
@@ -267,7 +374,9 @@ class TournamentManager {
                 buchholz: t.buchholz,
                 opponents: t.opponents,
                 aff_count: t.aff_count,
-                neg_count: t.neg_count
+                neg_count: t.neg_count,
+                last_side: t.last_side,
+                side_history: t.side_history
             }))
         };
     }
@@ -283,6 +392,8 @@ class TournamentManager {
             team.opponents = t.opponents;
             team.aff_count = t.aff_count;
             team.neg_count = t.neg_count;
+            team.last_side = t.last_side || null;
+            team.side_history = t.side_history || {};
             return team;
         });
         this.saveToStorage();
