@@ -202,16 +202,37 @@ function renderTabs() {
     standingsBtn.onclick = showStandings;
     mainTabs.appendChild(standingsBtn);
 
-    // Show appropriate tab
-    if (activeTab && activeTab.startsWith('round')) {
+    // Handle URL hash or active tab
+    const hash = window.location.hash.slice(1); // Remove '#'
+
+    if (hash) {
+        // Route based on hash
+        if (hash.startsWith('round')) {
+            const roundNum = parseInt(hash.replace('round', ''));
+            if (roundNum <= maxPairedRound) {
+                showRound(roundNum);
+                return;
+            }
+        } else if (hash === 'standings') {
+            showStandings();
+            return;
+        } else if (hash.startsWith('team')) {
+            const teamId = parseInt(hash.replace('team', ''));
+            showTeamDetails(teamId);
+            return;
+        }
+    } else if (activeTab && activeTab.startsWith('round')) {
         const roundNum = parseInt(activeTab.replace('round', ''));
-        // Verify round still exists (it should)
         if (roundNum <= maxPairedRound) {
             showRound(roundNum);
             return;
         }
     } else if (activeTab === 'standings') {
         showStandings();
+        return;
+    } else if (activeTab && activeTab.startsWith('team')) {
+        const teamId = parseInt(activeTab.replace('team', ''));
+        showTeamDetails(teamId);
         return;
     }
 
@@ -258,6 +279,7 @@ function handleNewRound() {
 // Show Round View
 function showRound(roundNum) {
     activeTab = `round${roundNum}`;
+    window.location.hash = `round${roundNum}`;
 
     // Update active tab button
     const tabs = mainTabs.querySelectorAll('.tab-btn');
@@ -313,6 +335,7 @@ function showRound(roundNum) {
 // Show Standings
 function showStandings() {
     activeTab = 'standings';
+    window.location.hash = 'standings';
 
     // Update active tab button
     const tabs = mainTabs.querySelectorAll('.tab-btn');
@@ -406,11 +429,17 @@ window.unsubmitResult = function (matchId) {
 };
 
 // Show Team Details
-window.showTeamDetails = function (teamId) {
+window.showTeamDetails = function (teamId, previousView = null) {
     const team = tournament.teams.find(t => t.id === teamId);
     if (!team) return;
 
+    // Store previous view if not provided (use current activeTab)
+    if (!previousView) {
+        previousView = activeTab || 'standings';
+    }
+
     activeTab = `team${teamId}`;
+    window.location.hash = `team${teamId}`;
 
     // Update active tab button (clear all active states)
     const tabs = mainTabs.querySelectorAll('.tab-btn');
@@ -444,13 +473,27 @@ window.showTeamDetails = function (teamId) {
         }
     });
 
+    // Determine back button action
+    let backAction = 'showStandings()';
+    let backLabel = '← Back to Standings';
+
+    if (previousView.startsWith('round')) {
+        const roundNum = parseInt(previousView.replace('round', ''));
+        backAction = `showRound(${roundNum})`;
+        backLabel = `← Back to Round ${roundNum}`;
+    } else if (previousView.startsWith('team')) {
+        const prevTeamId = parseInt(previousView.replace('team', ''));
+        backAction = `showTeamDetails(${prevTeamId}, '${activeTab}')`;
+        backLabel = '← Back';
+    }
+
     tabContent.innerHTML = `
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
                 <h3>Team Details: ${team.name}</h3>
-                <button class="btn btn-secondary" onclick="showStandings()">← Back to Standings</button>
+                <button class="btn btn-secondary" onclick="${backAction}">${backLabel}</button>
             </div>
-            
+
             <div class="team-stats-grid">
                 <div class="stat-card">
                     <div class="stat-label">Record</div>
@@ -499,7 +542,7 @@ window.showTeamDetails = function (teamId) {
                             <tr>
                                 <td>Round ${match.round_num}</td>
                                 <td>${side}</td>
-                                <td><a href="#" onclick="showTeamDetails(${oppId}); return false;" class="team-link">${oppName}</a></td>
+                                <td><a href="#" onclick="showTeamDetails(${oppId}, 'team${teamId}'); return false;" class="team-link">${oppName}</a></td>
                                 <td class="${resultClass}">${result}</td>
                             </tr>
                         `;
@@ -520,7 +563,7 @@ window.showTeamDetails = function (teamId) {
                 <tbody>
                     ${Object.entries(h2hRecords).map(([oppId, record]) => `
                         <tr>
-                            <td><a href="#" onclick="showTeamDetails(${oppId}); return false;" class="team-link">${record.name}</a></td>
+                            <td><a href="#" onclick="showTeamDetails(${oppId}, 'team${teamId}'); return false;" class="team-link">${record.name}</a></td>
                             <td>${record.wins}</td>
                             <td>${record.losses}</td>
                             <td>${record.pending}</td>
@@ -531,6 +574,13 @@ window.showTeamDetails = function (teamId) {
         </div>
     `;
 };
+
+// Handle browser back/forward navigation
+window.addEventListener('hashchange', () => {
+    if (tournament.data) {
+        updateDashboard();
+    }
+});
 
 // Initialize on load
 initUI();
