@@ -161,6 +161,28 @@ Prompts for each match result interactively. Type `q` or `exit` to quit early.
 # Follow prompts to enter results for each match
 ```
 
+#### Using `--force` for Flexible Reporting
+
+The `--force` flag provides two important capabilities:
+
+1. **Overwrite existing results**: Change a result that was already reported
+2. **Bypass previous round completion requirement**: Report results for later rounds even if earlier rounds are incomplete
+
+**Examples:**
+```bash
+# Overwrite an existing result
+./tournament_manager.py report 1 1 0 1 N --force
+
+# Report Round 3 results even if Round 1 or 2 are incomplete
+./tournament_manager.py report 3 --file round3_results.txt --force
+
+# Useful after reinit with partial results
+./tournament_manager.py reinit --pairings backup.txt --results partial_results.txt
+./tournament_manager.py report 2 --file round2_results.txt --force
+```
+
+**Note:** By default, the `report` command requires all previous rounds (1 to N-1) to be complete before reporting Round N results. Use `--force` to override this validation when needed.
+
 ### `standings` - View Standings
 
 Display current tournament standings sorted by score, Buchholz, and wins.
