@@ -4,88 +4,166 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Swiss Tournament Manager</title>
-    <link rel="stylesheet" href="styles.css">
+    <title>Swiss Tournament Tools</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            color: white;
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .subtitle {
+            text-align: center;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 1.2rem;
+            margin-bottom: 3rem;
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .card-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        .card h2 {
+            color: #667eea;
+            margin-bottom: 1rem;
+            font-size: 1.8rem;
+        }
+
+        .card p {
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 1.5rem;
+        }
+
+        .card-features {
+            list-style: none;
+            margin-bottom: 1.5rem;
+        }
+
+        .card-features li {
+            color: #888;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .card-features li:last-child {
+            border-bottom: none;
+        }
+
+        .card-features li::before {
+            content: "✓ ";
+            color: #667eea;
+            font-weight: bold;
+            margin-right: 0.5rem;
+        }
+
+        .btn {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: opacity 0.3s ease;
+            text-align: center;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2rem;
+            }
+
+            .subtitle {
+                font-size: 1rem;
+            }
+        }
+    </style>
 </head>
 
 <body>
     <div class="container">
-        <header>
-            <h1>🏆 Swiss Tournament Manager</h1>
-            <div class="header-actions">
-                <button id="exportBtn" class="btn btn-secondary">📥 Export</button>
-                <button id="importBtn" class="btn btn-secondary">📤 Import</button>
-                <input type="file" id="importFile" accept=".json" style="display: none;">
-            </div>
-        </header>
+        <h1>🏆 Swiss Tournament Tools</h1>
+        <p class="subtitle">Professional tools for running and simulating Swiss-system tournaments</p>
 
-        <!-- Tournament Setup -->
-        <section id="setupSection" class="card">
-            <h2>Initialize Tournament</h2>
-            <form id="setupForm">
-                <div class="form-group">
-                    <label for="numTeams">Number of Teams:</label>
-                    <input type="number" id="numTeams" min="2" max="300" value="8" required>
-                </div>
-                <div class="form-group">
-                    <label for="numRounds">Number of Rounds:</label>
-                    <input type="number" id="numRounds" min="1" max="20" value="4" required>
-                </div>
-                <div class="form-group">
-                    <label for="teamNames">Team Names (one per line, optional):</label>
-                    <textarea id="teamNames" rows="8" placeholder="Team 1&#10;Team 2&#10;Team 3&#10;..."></textarea>
-                </div>
-                <button type="submit" class="btn btn-primary">Initialize Tournament</button>
-            </form>
-        </section>
+        <div class="cards">
+            <a href="simulator/index.html" class="card">
+                <div class="card-icon">📊</div>
+                <h2>Tournament Simulator</h2>
+                <p>Run Monte Carlo simulations to analyze Swiss tournament outcomes and probabilities.</p>
+                <ul class="card-features">
+                    <li>Simulate thousands of tournaments</li>
+                    <li>Calculate top-N finish probabilities</li>
+                    <li>Analyze rank distributions</li>
+                    <li>Customizable win models (Elo, Linear, Deterministic)</li>
+                </ul>
+                <span class="btn">Launch Simulator →</span>
+            </a>
 
-        <!-- Tournament Dashboard -->
-        <section id="dashboardSection" class="hidden">
-            <div class="dashboard-header">
-                <h2>Tournament Dashboard</h2>
-                <div class="tournament-info">
-                    <span id="tournamentInfo"></span>
-                    <button id="resetBtn" class="btn btn-danger">Reset Tournament</button>
-                </div>
-            </div>
-
-            <!-- Dynamic Tab Navigation -->
-            <div id="mainTabs" class="tabs">
-                <!-- Populated by JS: [Round 1] [Round 2] ... [+] [Standings] -->
-            </div>
-
-            <!-- Tab Content Container -->
-            <div id="tabContent" class="tab-content-container">
-                <!-- Populated by JS -->
-            </div>
-        </section>
-    </div>
-
-    <!-- Generic Confirmation Modal -->
-    <div id="confirmModal" class="modal hidden">
-        <div class="modal-content">
-            <h3 id="confirmModalTitle">Confirm Action</h3>
-            <p id="confirmModalMessage">Are you sure you want to proceed?</p>
-            <div class="modal-actions">
-                <button id="cancelResetBtn" class="btn btn-secondary">Cancel</button>
-                <button id="confirmResetBtn" class="btn btn-danger">Confirm</button>
-            </div>
+            <a href="manager/index.html" class="card">
+                <div class="card-icon">⚙️</div>
+                <h2>Tournament Manager</h2>
+                <p>Manage real Swiss tournaments with automated pairing and standings tracking.</p>
+                <ul class="card-features">
+                    <li>Automated Swiss pairings</li>
+                    <li>Real-time standings with Buchholz</li>
+                    <li>Side balance tracking</li>
+                    <li>Result correction tools</li>
+                </ul>
+                <span class="btn">Launch Manager →</span>
+            </a>
         </div>
     </div>
-
-    <!-- Notification Modal -->
-    <div id="notificationModal" class="modal hidden">
-        <div class="modal-content">
-            <h3 id="notificationTitle">Notice</h3>
-            <p id="notificationMessage"></p>
-            <div class="modal-actions">
-                <button id="notificationOkBtn" class="btn btn-primary">OK</button>
-            </div>
-        </div>
-    </div>
-
-    <script src="tournament.js"></script>
-    <script src="app.js"></script>
 </body>
 
 </html>
