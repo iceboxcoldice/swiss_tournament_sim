@@ -310,8 +310,12 @@ def _handle_single_match_report(args, matches) -> bool:
     print(f"Recording result for Match {match['match_id']}: {match['aff_name']} vs {match['neg_name']} -> {args.outcome.upper()}")
     return True
 
-def _handle_file_report(args, matches) -> bool:
-    # Categories for console summary
+def _parse_results_file(filename, matches, force=False):
+    """Parse a results file and apply results to matches.
+    
+    Returns: (valid_count, errors_by_type, all_errors)
+    where errors are lists of (line_num, line_text, error_msg) tuples
+    """
     errors_by_type = {
         'MATCH_NOT_FOUND': [],
         'TEAM_MISMATCH': [],
@@ -319,14 +323,18 @@ def _handle_file_report(args, matches) -> bool:
         'ROUND_MISMATCH': [],
         'INVALID_FORMAT': []
     }
-    all_errors = [] # For file annotation: (line_num, line_text, msg)
+    all_errors = []
     valid_count = 0
     
-    with open(args.file, 'r') as f:
+    with open(filename, 'r') as f:
         for line_num, line in enumerate(f, 1):
             stripped = line.strip()
             if not stripped or stripped.startswith('#'):
                 continue
+            
+            # Remove inline comments
+            if '#' in stripped:
+                stripped = stripped.split('#')[0].strip()
                 
             parts = stripped.split()
             if len(parts) < 5:
@@ -342,12 +350,10 @@ def _handle_file_report(args, matches) -> bool:
                 neg_id = int(parts[3])
                 outcome = parts[4].upper()
                 
-
-                
                 # Process result
                 success, code, error_msg = _process_match_result(
                     r_num, m_id, aff_id, neg_id, outcome, 
-                    matches, args.force 
+                    matches, force
                 )
                 
                 if success:
@@ -361,6 +367,12 @@ def _handle_file_report(args, matches) -> bool:
                 msg = f"Parse error: {str(e)}"
                 errors_by_type['INVALID_FORMAT'].append((line_num, stripped, msg))
                 all_errors.append((line_num, stripped, msg))
+    
+    return valid_count, errors_by_type, all_errors
+
+def _handle_file_report(args, matches) -> bool:
+    # Use shared parsing function
+    valid_count, errors_by_type, all_errors = _parse_results_file(args.file, matches, args.force)
     
     print(f"Processed {valid_count} valid results.")
     
@@ -411,13 +423,11 @@ def _handle_file_report(args, matches) -> bool:
             f_out.write(f"# Annotated error file\n")
             f_out.write(f"# Original file: {args.file}\n")
             f_out.write(f"# Only lines with errors are included below.\n")
-            f_out.write(f"# Fix the errors and re-run: ./tournament_manager.py report {current_round_num} --file {error_file}\n\n")
+            f_out.write(f"# Fix the errors and re-run: ./tournament_manager.py report {args.round} --file {error_file}\n\n")
             
             for line_num, line_text, msg in all_errors:
                 f_out.write(f"{line_text}  # <<< ERROR: {msg}\n")
                 
-        print(f"\n📝 Annotated error file created: {error_file}")
-        
         print(f"\n📝 Annotated error file created: {error_file}")
         return False
         
@@ -535,7 +545,6 @@ def cmd_export(args):
     # Sort by round for cleaner output
     reported_matches.sort(key=lambda m: (m['round_num'], m['match_id']))
     
-    # Export results file (only if there are results)
     output_file = args.output if args.output else "results_export.txt"
     
     # Always create results file (even if no results yet) to serve as template
@@ -596,6 +605,197 @@ def cmd_export(args):
     
     print(f"Exported pairings to {pairings_file}")
 
+def cmd_reinit(args):
+    """Reconstruct tournament from pairing and results files."""
+    import re
+    
+    # Check if tournament exists
+    if os.path.exists(TOURNAMENT_FILE) and not args.force:
+        print(f"Error: {TOURNAMENT_FILE} already exists. Use --force to overwrite.")
+        sys.exit(1)
+    
+    # Parse pairing file
+    print("Parsing pairing file...")
+    if not os.path.exists(args.pairings):
+        print(f"Error: Pairing file '{args.pairings}' not found.")
+        sys.exit(1)
+    
+    matches = []
+    team_ids = set()
+    match_ids = set()
+    rounds_seen = set()
+    
+    with open(args.pairings, 'r') as f:
+        for line_num, line in enumerate(f, 1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#'):
+                continue
+            
+            # Parse format: Round MatchID AffID NegID [# comment]
+            # Remove inline comments
+            if '#' in stripped:
+                stripped = stripped.split('#')[0].strip()
+            
+            parts = stripped.split()
+            if len(parts) < 4:
+                print(f"Error: Invalid format in pairing file at line {line_num}")
+                print(f"  Expected: Round MatchID AffID NegID")
+                print(f"  Got: {line.strip()}")
+                sys.exit(1)
+            
+            try:
+                round_num = int(parts[0])
+                match_id = int(parts[1])
+                aff_id = int(parts[2])
+                neg_id = int(parts[3])
+            except ValueError as e:
+                print(f"Error: Invalid number in pairing file at line {line_num}: {e}")
+                sys.exit(1)
+            
+            # Validation
+            if match_id in match_ids:
+                print(f"Error: Duplicate match ID {match_id} in pairing file at line {line_num}")
+                sys.exit(1)
+            
+            match_ids.add(match_id)
+            team_ids.add(aff_id)
+            team_ids.add(neg_id)
+            rounds_seen.add(round_num)
+            
+            matches.append({
+                'match_id': match_id,
+                'round_num': round_num,
+                'aff_id': aff_id,
+                'neg_id': neg_id,
+                'result': None
+            })
+    
+    if not matches:
+        print("Error: No matches found in pairing file.")
+        sys.exit(1)
+    
+    # Validate sequential rounds
+    sorted_rounds = sorted(rounds_seen)
+    for i, r in enumerate(sorted_rounds, 1):
+        if r != i:
+            print(f"Error: Non-sequential round numbers. Expected round {i}, found round {r}.")
+            sys.exit(1)
+    
+    num_teams = max(team_ids) + 1
+    num_rounds = max(rounds_seen)
+    
+    print(f"  Found {len(matches)} matches across {num_rounds} rounds")
+    print(f"  Detected {num_teams} teams (IDs 0-{num_teams-1})")
+    
+    # Parse results file (optional)
+    results_count = 0
+    if args.results:
+        print(f"\nParsing results file...")
+        if not os.path.exists(args.results):
+            print(f"Error: Results file '{args.results}' not found.")
+            sys.exit(1)
+        
+        # Use shared parsing function
+        results_count, errors_by_type, all_errors = _parse_results_file(args.results, matches, force=False)
+        
+        print(f"  Applied {results_count} results")
+        
+        # If there are errors, generate error file and exit
+        if all_errors:
+            print(f"\n⚠️  Found {len(all_errors)} issue(s) in results file:\n")
+            
+            # Print error summary (show first 3 of each type)
+            for error_type, errors in errors_by_type.items():
+                if errors:
+                    type_name = error_type.replace('_', ' ').title()
+                    print(f"❌ {type_name} ({len(errors)} lines):")
+                    for line_num, line_text, msg in errors[:3]:
+                        print(f"   Line {line_num}: {msg}")
+                        print(f"   → {line_text}")
+                    if len(errors) > 3:
+                        print(f"   ... and {len(errors) - 3} more")
+                    print()
+            
+            # Generate annotated error file
+            error_file = args.results.replace('.txt', '_errors.txt')
+            with open(error_file, 'w') as f_out:
+                f_out.write(f"# Errors found in {args.results}\n")
+                f_out.write(f"# Total errors: {len(all_errors)}\n\n")
+                
+                with open(args.results, 'r') as f_in:
+                    error_map = {line_num: msg for line_num, _, msg in all_errors}
+                    for line_num, line in enumerate(f_in, 1):
+                        if line_num in error_map:
+                            f_out.write(f"# ERROR: {error_map[line_num]}\n")
+                        f_out.write(line)
+            
+            print(f"Annotated error file created: {error_file}")
+            print(f"\nReinit aborted due to errors in results file.")
+            sys.exit(1)
+    
+    # Create teams with default names
+    print(f"\nCreating tournament with {num_teams} teams and {num_rounds} rounds...")
+    teams = []
+    
+    # Load team names if provided
+    team_names = []
+    if args.names:
+        if not os.path.exists(args.names):
+            print(f"Warning: Names file '{args.names}' not found. Using default names.")
+        else:
+            with open(args.names, 'r') as f:
+                team_names = [line.strip() for line in f if line.strip()]
+    
+    for i in range(num_teams):
+        if i < len(team_names):
+            name = team_names[i]
+        else:
+            name = f"Team {i+1}"
+        teams.append(Team(id=i, true_rank=0, name=name))
+    
+    # Add team names to matches
+    team_map = {t.id: t for t in teams}
+    for m in matches:
+        m['aff_name'] = team_map[m['aff_id']].name
+        m['neg_name'] = team_map[m['neg_id']].name
+    
+    # Create tournament data structure
+    data = {
+        "config": {
+            "num_teams": num_teams,
+            "num_rounds": num_rounds,
+        },
+        "current_round": 0,
+        "rounds": [{"round_num": r} for r in range(1, num_rounds + 1)],
+        "teams": [asdict(t) for t in teams],
+        "matches": matches,
+        "next_match_id": max(match_ids) + 1
+    }
+    
+    # Recalculate statistics
+    print("Recalculating statistics...")
+    recalculate_stats(data, teams, team_map)
+    
+    # Update current_round based on completed rounds
+    for r in range(1, num_rounds + 1):
+        round_matches = [m for m in matches if m['round_num'] == r]
+        if all(m['result'] is not None for m in round_matches):
+            data['current_round'] = r
+        else:
+            break
+    
+    # Save tournament
+    data['teams'] = [asdict(t) for t in teams]
+    with open(TOURNAMENT_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+    
+    print(f"\n✅ Tournament reconstructed successfully!")
+    print(f"   Teams: {num_teams}")
+    print(f"   Rounds: {num_rounds}")
+    print(f"   Matches: {len(matches)}")
+    print(f"   Results: {results_count}")
+    print(f"   Current round: {data['current_round']}")
+
 def main():
     parser = argparse.ArgumentParser(description="Swiss Tournament Manager")
     subparsers = parser.add_subparsers(dest="command", help="Subcommands")
@@ -628,6 +828,13 @@ def main():
     parser_export = subparsers.add_parser("export", help="Export results to file")
     parser_export.add_argument("--output", "-o", type=str, help="Output file (default: results_export.txt)")
     
+    # Reinit
+    parser_reinit = subparsers.add_parser("reinit", help="Reconstruct tournament from pairing and results files")
+    parser_reinit.add_argument("--pairings", "-p", type=str, required=True, help="Pairing file (format: Round MatchID AffID NegID)")
+    parser_reinit.add_argument("--results", "-r", type=str, help="Results file (optional, format: Round MatchID AffID NegID Outcome)")
+    parser_reinit.add_argument("--names", type=str, help="File with team names (one per line, indexed by team ID)")
+    parser_reinit.add_argument("--force", action="store_true", help="Overwrite existing tournament")
+    
     args = parser.parse_args()
     
     if args.command == "init":
@@ -640,6 +847,8 @@ def main():
         cmd_standings(args)
     elif args.command == "export":
         cmd_export(args)
+    elif args.command == "reinit":
+        cmd_reinit(args)
     else:
         parser.print_help()
 

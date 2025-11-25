@@ -251,6 +251,66 @@ Match  4 | Team 4               (Aff) vs Team 3               (Neg) | Not report
 - **Editing**: Use results file as template for entering results
 - **Re-import**: Results file can be edited and re-imported idempotently
 
+### `reinit` - Reconstruct Tournament
+
+Reconstruct a tournament from pairing and results files. Useful for disaster recovery, migration, or creating tournaments from external data.
+
+```bash
+./tournament_manager.py reinit --pairings PAIRING_FILE [--results RESULTS_FILE] [--names NAMES_FILE] [--force]
+```
+
+**Arguments:**
+- `--pairings, -p PAIRING_FILE`: Required. File containing match pairings
+- `--results, -r RESULTS_FILE`: Optional. File containing match results
+- `--names NAMES_FILE`: Optional. File with team names (one per line, indexed by team ID)
+- `--force`: Overwrite existing tournament
+
+**Pairing File Format:**
+Simple format with one match per line:
+```
+# Format: Round MatchID AffID NegID
+1 1 0 1
+1 2 2 3
+2 3 0 2
+2 4 1 3
+```
+
+**Note:** This is a simple machine-readable format, not the formatted pairings file from `export`. You can create this manually or extract from spreadsheets.
+
+**Results File Format:**
+Same as `report --file` format:
+```
+# Format: Round MatchID AffID NegID Outcome
+1 1 0 1 A
+1 2 2 3 N
+```
+
+**Validation:**
+The command performs comprehensive consistency checks:
+- Match IDs must be unique globally
+- Round numbers must be sequential (1, 2, 3, ...)
+- All match IDs in results must exist in pairings
+- Team IDs in results must match pairings
+- Outcomes must be A or N
+
+**Example:**
+```bash
+# Reconstruct from pairings only
+./tournament_manager.py reinit --pairings backup_pairings.txt
+
+# Reconstruct with results
+./tournament_manager.py reinit --pairings backup.txt --results backup.txt
+
+# Overwrite existing tournament
+./tournament_manager.py reinit -p pairings.txt -r results.txt --force
+```
+
+**Use Cases:**
+- **Disaster Recovery**: Restore tournament from exported files
+- **Migration**: Move tournament between systems
+- **Manual Creation**: Create tournament from spreadsheet data
+- **Testing**: Quickly set up test scenarios
+
 ## Tournament State
 
 Tournament data is stored in `tournament.json` with the following structure:
