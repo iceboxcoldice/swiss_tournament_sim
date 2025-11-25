@@ -277,14 +277,13 @@ function showRound(roundNum) {
             <div class="pairings-grid">
                 ${matches.map(m => {
         const hasResult = m.result !== null;
-        const winner = m.result === 'A' ? m.aff_name : (m.result === 'N' ? m.neg_name : null);
 
         return `
                         <div class="pairing-item">
                             <div class="pairing-teams">
-                                <div><span class="team team-aff">${m.aff_name}</span> (Aff) ${m.result === 'A' ? '✓' : ''}</div>
+                                <div><a href="#" onclick="showTeamDetails(${m.aff_id}); return false;" class="team-link team-aff">${m.aff_name}</a> (Aff) ${m.result === 'A' ? '✓' : ''}</div>
                                 <div>vs</div>
-                                <div><span class="team team-neg">${m.neg_name}</span> (Neg) ${m.result === 'N' ? '✓' : ''}</div>
+                                <div><a href="#" onclick="showTeamDetails(${m.neg_id}); return false;" class="team-link team-neg">${m.neg_name}</a> (Neg) ${m.result === 'N' ? '✓' : ''}</div>
                             </div>
                             <div class="match-controls">
                                 <span class="match-id">Match ${m.match_id}</span>
@@ -350,7 +349,7 @@ function showStandings() {
                     ${standings.map((team, index) => `
                         <tr>
                             <td>${index + 1}</td>
-                            <td><strong>${team.name}</strong></td>
+                            <td><a href="#" onclick="showTeamDetails(${team.id}); return false;" class="team-link"><strong>${team.name}</strong></a></td>
                             <td>${team.wins}</td>
                             <td>${team.score.toFixed(1)}</td>
                             <td>${team.buchholz.toFixed(1)}</td>
@@ -404,6 +403,133 @@ window.unsubmitResult = function (matchId) {
             }
         }
     );
+};
+
+// Show Team Details
+window.showTeamDetails = function (teamId) {
+    const team = tournament.teams.find(t => t.id === teamId);
+    if (!team) return;
+
+    activeTab = `team${teamId}`;
+
+    // Update active tab button (clear all active states)
+    const tabs = mainTabs.querySelectorAll('.tab-btn');
+    tabs.forEach(btn => btn.classList.remove('active'));
+
+    // Get all matches for this team
+    const teamMatches = tournament.data.matches.filter(m =>
+        m.aff_id === teamId || m.neg_id === teamId
+    ).sort((a, b) => a.round_num - b.round_num);
+
+    // Calculate head-to-head records
+    const h2hRecords = {};
+    teamMatches.forEach(match => {
+        const isAff = match.aff_id === teamId;
+        const oppId = isAff ? match.neg_id : match.aff_id;
+        const oppName = isAff ? match.neg_name : match.aff_name;
+
+        if (!h2hRecords[oppId]) {
+            h2hRecords[oppId] = { name: oppName, wins: 0, losses: 0, pending: 0 };
+        }
+
+        if (match.result === null) {
+            h2hRecords[oppId].pending++;
+        } else {
+            const won = (isAff && match.result === 'A') || (!isAff && match.result === 'N');
+            if (won) {
+                h2hRecords[oppId].wins++;
+            } else {
+                h2hRecords[oppId].losses++;
+            }
+        }
+    });
+
+    tabContent.innerHTML = `
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h3>Team Details: ${team.name}</h3>
+                <button class="btn btn-secondary" onclick="showStandings()">← Back to Standings</button>
+            </div>
+            
+            <div class="team-stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Record</div>
+                    <div class="stat-value">${team.wins}-${teamMatches.filter(m => m.result !== null).length - team.wins}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Score</div>
+                    <div class="stat-value">${team.score.toFixed(1)}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Buchholz</div>
+                    <div class="stat-value">${team.buchholz.toFixed(1)}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Side Balance</div>
+                    <div class="stat-value">${team.aff_count} Aff / ${team.neg_count} Neg</div>
+                </div>
+            </div>
+
+            <h4 style="margin-top: 2rem; margin-bottom: 1rem;">Match History</h4>
+            <table class="standings-table">
+                <thead>
+                    <tr>
+                        <th>Round</th>
+                        <th>Side</th>
+                        <th>Opponent</th>
+                        <th>Result</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${teamMatches.map(match => {
+        const isAff = match.aff_id === teamId;
+        const oppId = isAff ? match.neg_id : match.aff_id;
+        const oppName = isAff ? match.neg_name : match.aff_name;
+        const side = isAff ? 'Aff' : 'Neg';
+
+        let result = '—';
+        let resultClass = '';
+        if (match.result !== null) {
+            const won = (isAff && match.result === 'A') || (!isAff && match.result === 'N');
+            result = won ? 'Win' : 'Loss';
+            resultClass = won ? 'result-win' : 'result-loss';
+        }
+
+        return `
+                            <tr>
+                                <td>Round ${match.round_num}</td>
+                                <td>${side}</td>
+                                <td><a href="#" onclick="showTeamDetails(${oppId}); return false;" class="team-link">${oppName}</a></td>
+                                <td class="${resultClass}">${result}</td>
+                            </tr>
+                        `;
+    }).join('')}
+                </tbody>
+            </table>
+
+            <h4 style="margin-top: 2rem; margin-bottom: 1rem;">Head-to-Head Records</h4>
+            <table class="standings-table">
+                <thead>
+                    <tr>
+                        <th>Opponent</th>
+                        <th>Wins</th>
+                        <th>Losses</th>
+                        <th>Pending</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${Object.entries(h2hRecords).map(([oppId, record]) => `
+                        <tr>
+                            <td><a href="#" onclick="showTeamDetails(${oppId}); return false;" class="team-link">${record.name}</a></td>
+                            <td>${record.wins}</td>
+                            <td>${record.losses}</td>
+                            <td>${record.pending}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
 };
 
 // Initialize on load

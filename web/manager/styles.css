@@ -468,3 +468,56 @@ header h1 {
 .btn-warning:hover {
     background-color: #e0a800;
 }
+
+/* Team Links */
+.team-link {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.2s ease;
+}
+
+.team-link:hover {
+    color: var(--primary-dark);
+    text-decoration: underline;
+}
+
+/* Team Stats Grid */
+.team-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    border-radius: 8px;
+    padding: 1.5rem;
+    text-align: center;
+}
+
+.stat-label {
+    font-size: 0.9rem;
+    color: #666;
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: bold;
+    color: var(--primary-color);
+}
+
+/* Result Indicators */
+.result-win {
+    color: var(--success-color);
+    font-weight: bold;
+}
+
+.result-loss {
+    color: var(--danger-color);
+    font-weight: bold;
+}
