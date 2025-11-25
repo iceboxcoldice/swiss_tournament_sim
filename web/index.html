@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Swiss Tournament Manager</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>🏆 Swiss Tournament Manager</h1>
+            <div class="header-actions">
+                <button id="exportBtn" class="btn btn-secondary">📥 Export</button>
+                <button id="importBtn" class="btn btn-secondary">📤 Import</button>
+                <input type="file" id="importFile" accept=".json" style="display: none;">
+            </div>
+        </header>
+
+        <!-- Tournament Setup -->
+        <section id="setupSection" class="card">
+            <h2>Initialize Tournament</h2>
+            <form id="setupForm">
+                <div class="form-group">
+                    <label for="numTeams">Number of Teams:</label>
+                    <input type="number" id="numTeams" min="2" max="300" value="8" required>
+                </div>
+                <div class="form-group">
+                    <label for="numRounds">Number of Rounds:</label>
+                    <input type="number" id="numRounds" min="1" max="20" value="4" required>
+                </div>
+                <div class="form-group">
+                    <label for="teamNames">Team Names (one per line, optional):</label>
+                    <textarea id="teamNames" rows="8" placeholder="Team 1&#10;Team 2&#10;Team 3&#10;..."></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">Initialize Tournament</button>
+            </form>
+        </section>
+
+        <!-- Tournament Dashboard -->
+        <section id="dashboardSection" class="hidden">
+            <div class="dashboard-header">
+                <h2>Tournament Dashboard</h2>
+                <div class="tournament-info">
+                    <span id="tournamentInfo"></span>
+                    <button id="resetBtn" class="btn btn-danger">Reset Tournament</button>
+                </div>
+            </div>
+
+            <!-- Dynamic Tab Navigation -->
+            <div id="mainTabs" class="tabs">
+                <!-- Populated by JS: [Round 1] [Round 2] ... [+] [Standings] -->
+            </div>
+
+            <!-- Tab Content Container -->
+            <div id="tabContent" class="tab-content-container">
+                <!-- Populated by JS -->
+            </div>
+        </section>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmModal" class="modal hidden">
+        <div class="modal-content">
+            <h3>⚠️ Reset Tournament?</h3>
+            <p>Are you sure you want to reset the tournament? This action cannot be undone and all data will be lost.
+            </p>
+            <div class="modal-actions">
+                <button id="cancelResetBtn" class="btn btn-secondary">Cancel</button>
+                <button id="confirmResetBtn" class="btn btn-danger">Yes, Reset</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Modal -->
+    <div id="notificationModal" class="modal hidden">
+        <div class="modal-content">
+            <h3 id="notificationTitle">Notice</h3>
+            <p id="notificationMessage"></p>
+            <div class="modal-actions">
+                <button id="notificationOkBtn" class="btn btn-primary">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="tournament.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>
