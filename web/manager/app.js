@@ -303,9 +303,9 @@ function showRound(roundNum) {
         return `
                         <div class="pairing-item">
                             <div class="pairing-teams">
-                                <div><a href="#" onclick="showTeamDetails(${m.aff_id}); return false;" class="team-link team-aff">${m.aff_name}</a> (Aff) ${m.result === 'A' ? '✓' : ''}</div>
+                                <div><a href="#" onclick="showTeamDetails(${m.aff_id}, 'round${roundNum}'); return false;" class="team-link team-aff">${m.aff_name}</a> (Aff) ${m.result === 'A' ? '✓' : ''}</div>
                                 <div>vs</div>
-                                <div><a href="#" onclick="showTeamDetails(${m.neg_id}); return false;" class="team-link team-neg">${m.neg_name}</a> (Neg) ${m.result === 'N' ? '✓' : ''}</div>
+                                <div><a href="#" onclick="showTeamDetails(${m.neg_id}, 'round${roundNum}'); return false;" class="team-link team-neg">${m.neg_name}</a> (Neg) ${m.result === 'N' ? '✓' : ''}</div>
                             </div>
                             <div class="match-controls">
                                 <span class="match-id">Match ${m.match_id}</span>
@@ -372,7 +372,7 @@ function showStandings() {
                     ${standings.map((team, index) => `
                         <tr>
                             <td>${index + 1}</td>
-                            <td><a href="#" onclick="showTeamDetails(${team.id}); return false;" class="team-link"><strong>${team.name}</strong></a></td>
+                            <td><a href="#" onclick="showTeamDetails(${team.id}, 'standings'); return false;" class="team-link"><strong>${team.name}</strong></a></td>
                             <td>${team.wins}</td>
                             <td>${team.score.toFixed(1)}</td>
                             <td>${team.buchholz.toFixed(1)}</td>
