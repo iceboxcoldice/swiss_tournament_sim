@@ -205,11 +205,14 @@ class TournamentManager {
                 // Break seeds already assigned - use existing seeds (display mode)
                 activeTeams = teamsWithSeeds.sort((a, b) => a.break_seed - b.break_seed);
             } else {
-                // Initial pairing - calculate from standings
-                const standings = this.getStandings();
-                activeTeams = standings.slice(0, breakSize);
+                // Initial pairing - calculate from preliminary standings
+                const prelimStandings = this.getPreliminaryStandings();
+                // Get actual team references (not copies) from this.teams
+                activeTeams = prelimStandings.slice(0, breakSize).map(t =>
+                    this.teams.find(team => team.id === t.id)
+                );
 
-                // Assign seeds
+                // Assign seeds based on preliminary standings
                 activeTeams.forEach((team, index) => {
                     team.break_seed = index + 1;
                 });

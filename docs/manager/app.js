@@ -447,13 +447,13 @@ function generateBracketHTML() {
             html += `<div class="bracket-match">`;
             html += `<div class="bracket-team ${firstWon ? 'winner' : ''} ${hasResult && !firstWon ? 'loser' : ''}">`;
             html += `<span class="seed">${firstTeam.break_seed}</span>`;
-            html += `<span class="team-name">${firstTeam.name}</span>`;
+            html += `<span class="team-name"><a href="#" onclick="showTeamDetails(${firstTeam.id}, 'standings'); return false;" class="team-link" style="color: inherit; text-decoration: none;">${firstTeam.name}</a></span>`;
             html += `<span class="side-label">${firstSide}</span>`;
             if (firstWon) html += `<span class="win-indicator">✓</span>`;
             html += `</div>`;
             html += `<div class="bracket-team ${secondWon ? 'winner' : ''} ${hasResult && !secondWon ? 'loser' : ''}">`;
             html += `<span class="seed">${secondTeam.break_seed}</span>`;
-            html += `<span class="team-name">${secondTeam.name}</span>`;
+            html += `<span class="team-name"><a href="#" onclick="showTeamDetails(${secondTeam.id}, 'standings'); return false;" class="team-link" style="color: inherit; text-decoration: none;">${secondTeam.name}</a></span>`;
             html += `<span class="side-label">${secondSide}</span>`;
             if (secondWon) html += `<span class="win-indicator">✓</span>`;
             html += `</div>`;
@@ -733,9 +733,16 @@ window.showTeamDetails = function (teamId, previousView = null) {
             resultClass = won ? 'result-win' : 'result-loss';
         }
 
+        const { num_prelim_rounds, num_elim_rounds } = tournament.data.config;
+        let roundLabel = `Round ${match.round_num}`;
+        if (match.round_num > num_prelim_rounds) {
+            const elimRoundNum = match.round_num - num_prelim_rounds;
+            roundLabel = getElimRoundLabel(elimRoundNum, num_elim_rounds);
+        }
+
         return `
                             <tr>
-                                <td>Round ${match.round_num}</td>
+                                <td>${roundLabel}</td>
                                 <td>${side}</td>
                                 <td><a href="#" onclick="showTeamDetails(${oppId}); return false;" class="team-link">${oppName}</a></td>
                                 <td class="${resultClass}">${result}</td>
