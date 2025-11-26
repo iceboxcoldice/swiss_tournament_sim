@@ -185,7 +185,7 @@ class TournamentManager {
     }
 
     // Generate Elimination Pairings (High vs Low)
-    generateElimPairings(roundNum) {
+    generateElimPairingsBeforeAffNegOrder(roundNum) {
         const { num_prelim_rounds, num_elim_rounds } = this.data.config;
         const elimRoundIdx = roundNum - num_prelim_rounds;
 
@@ -198,14 +198,22 @@ class TournamentManager {
         let activeTeams = [];
 
         if (elimRoundIdx === 1) {
-            // First elim round: Break the top teams
-            const standings = this.getStandings();
-            activeTeams = standings.slice(0, breakSize);
+            // First elim round: Check if break_seeds already assigned (display mode) or need to assign (pairing mode)
+            const teamsWithSeeds = this.teams.filter(t => t.break_seed !== null && t.break_seed <= breakSize);
 
-            // Assign seeds
-            activeTeams.forEach((team, index) => {
-                team.break_seed = index + 1;
-            });
+            if (teamsWithSeeds.length === breakSize) {
+                // Break seeds already assigned - use existing seeds (display mode)
+                activeTeams = teamsWithSeeds.sort((a, b) => a.break_seed - b.break_seed);
+            } else {
+                // Initial pairing - calculate from standings
+                const standings = this.getStandings();
+                activeTeams = standings.slice(0, breakSize);
+
+                // Assign seeds
+                activeTeams.forEach((team, index) => {
+                    team.break_seed = index + 1;
+                });
+            }
         } else {
             // Subsequent rounds: Get winners from previous round
             const prevRound = roundNum - 1;
@@ -222,8 +230,8 @@ class TournamentManager {
                     : this.teams.find(t => t.id === m.neg_id);
             });
 
-            // Sort by break seed (High seed = Low number)
-            activeTeams.sort((a, b) => a.break_seed - b.break_seed);
+            // In elimination round, don't sort by break seed 
+            // // activeTeams.sort((a, b) => a.break_seed - b.break_seed);
         }
 
         // Pair using standard bracket structure
@@ -298,24 +306,30 @@ class TournamentManager {
                 }
             }
             // Create the pairs
-            for (const [highIdx, lowIdx] of allPairingsSwapped) {
-                const highSeed = activeTeams[highIdx];
-                const lowSeed = activeTeams[lowIdx];
-                const [aff, neg] = this.determineSides(highSeed, lowSeed, false);
-                pairs.push([aff, neg]);
+            for (const [highIdx, lowIdx] of allPairings) {
+                pairs.push([activeTeams[highIdx], activeTeams[lowIdx]]);
             }
         } else {
             // Subsequent rounds: Pair winners sequentially (already in correct bracket order)
             for (let i = 0; i < numPairs; i++) {
                 const team1 = activeTeams[i * 2];
                 const team2 = activeTeams[i * 2 + 1];
-
-                const [aff, neg] = this.determineSides(team1, team2, false);
-                pairs.push([aff, neg]);
+                pairs.push([team1, team2]);
             }
         }
 
         return pairs;
+    }
+
+    // generate Elim Match pairing [aff_team, neg_team]
+    generateElimPairings(roundNum) {
+        const match_pairs = [];
+        const pairs = this.generateElimPairingsBeforeAffNegOrder(roundNum);
+        pairs.forEach(pair => {
+            const [aff, neg] = this.determineSides(pair[0], pair[1], false);
+            match_pairs.push([aff, neg]);
+        });
+        return match_pairs;
     }
 
     // Helper: Calculate side preference score

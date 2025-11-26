@@ -405,8 +405,14 @@ function generateBracketHTML() {
     for (let i = 1; i <= num_elim_rounds; i++) {
         const roundNum = num_prelim_rounds + i;
         const matches = tournament.data.matches.filter(m => m.round_num === roundNum);
+        let pairs = [];
+        try {
+            pairs = matches.length > 0 ? tournament.generateElimPairingsBeforeAffNegOrder(roundNum) : [];
+        } catch (error) {
+            console.error(error);
+        }
         const label = getElimRoundLabel(i, num_elim_rounds);
-        rounds.push({ roundNum, matches, label });
+        rounds.push({ roundNum, matches, pairs, label });
     }
 
     // Generate HTML
@@ -417,34 +423,26 @@ function generateBracketHTML() {
         html += `<div class="bracket-round-label">${round.label}</div>`;
         html += `<div class="bracket-matches">`;
 
-        let i = 0
-        round.matches.forEach(match => {
+        round.pairs.forEach(pair => {
+            const firstTeam = pair[0];
+            const secondTeam = pair[1];
 
-            const affTeam = tournament.teams.find(t => t.id === match.aff_id);
-            const negTeam = tournament.teams.find(t => t.id === match.neg_id);
+            // Find the match for these two teams
+            const match = round.matches.find(m =>
+                (m.aff_id === firstTeam.id && m.neg_id === secondTeam.id) ||
+                (m.aff_id === secondTeam.id && m.neg_id === firstTeam.id)
+            );
 
-            const affWon = match.result === 'A';
-            const negWon = match.result === 'N';
-            const hasResult = match.result !== null;
-
-            // Determine display order: higher seed (lower number) first
-            let firstTeam, secondTeam, firstSide, secondSide, firstWon, secondWon;
-            if ((i % 2 == 0) && (affTeam.break_seed < negTeam.break_seed)
-                || (i % 2 == 1) && (affTeam.break_seed > negTeam.break_seed)) {
-                firstTeam = affTeam;
-                secondTeam = negTeam;
-                firstSide = 'Aff';
-                secondSide = 'Neg';
-                firstWon = affWon;
-                secondWon = negWon;
-            } else {
-                firstTeam = negTeam;
-                secondTeam = affTeam;
-                firstSide = 'Neg';
-                secondSide = 'Aff';
-                firstWon = negWon;
-                secondWon = affWon;
+            if (!match) {
+                console.error(`No match found for teams ${firstTeam.id} (${firstTeam.name}) and ${secondTeam.id} (${secondTeam.name}) in round ${round.roundNum}`);
+                return;
             }
+
+            const firstSide = (match.aff_id === firstTeam.id) ? 'Aff' : 'Neg';
+            const firstWon = firstSide === 'Aff' ? match.result === 'A' : match.result === 'N';
+            const secondSide = firstSide === 'Aff' ? 'Neg' : 'Aff';
+            const secondWon = firstSide === 'Neg' ? match.result === 'A' : match.result === 'N';
+            const hasResult = match.result !== null;
 
             html += `<div class="bracket-match">`;
             html += `<div class="bracket-team ${firstWon ? 'winner' : ''} ${hasResult && !firstWon ? 'loser' : ''}">`;
@@ -460,7 +458,6 @@ function generateBracketHTML() {
             if (secondWon) html += `<span class="win-indicator">✓</span>`;
             html += `</div>`;
             html += `</div>`;
-            i++;
         });
 
         html += `</div>`;
