@@ -208,6 +208,13 @@ function renderTabs() {
 
     mainTabs.innerHTML = '';
 
+    // Create Entries tab
+    const entriesBtn = document.createElement('button');
+    entriesBtn.className = 'tab-btn';
+    entriesBtn.textContent = 'Entries';
+    entriesBtn.onclick = showEntries;
+    mainTabs.appendChild(entriesBtn);
+
     // Create round tabs
     const { num_prelim_rounds, num_elim_rounds } = tournament.data.config;
     for (let r = 1; r <= maxPairedRound; r++) {
@@ -243,7 +250,10 @@ function renderTabs() {
 
     if (hash) {
         // Route based on hash
-        if (hash.startsWith('round')) {
+        if (hash === 'entries') {
+            showEntries();
+            return;
+        } else if (hash.startsWith('round')) {
             const roundNum = parseInt(hash.replace('round', ''));
             if (roundNum <= maxPairedRound) {
                 showRound(roundNum);
@@ -466,6 +476,51 @@ function generateBracketHTML() {
 
     html += '</div></div>';
     return html;
+}
+
+// Show Entries (Team List)
+function showEntries() {
+    activeTab = 'entries';
+    window.location.hash = 'entries';
+
+    // Add to navigation history (avoid duplicates of current view)
+    if (navigationHistory[navigationHistory.length - 1] !== activeTab) {
+        navigationHistory.push(activeTab);
+    }
+
+    // Update active state
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        if (btn.textContent === 'Entries') {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+
+    const teams = tournament.teams;
+
+    tabContent.innerHTML = `
+        <div class="card">
+            <h3>Team Entries List</h3>
+            <p class="text-muted">Total Teams: ${teams.length}</p>
+            <table class="standings-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Team Name</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${teams.map(team => `
+                        <tr>
+                            <td>${team.id}</td>
+                            <td><a href="#" onclick="showTeamDetails(${team.id}, 'entries'); return false;" class="team-link"><strong>${team.name}</strong></a></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
 }
 
 // Show Standings
