@@ -289,8 +289,16 @@ class TournamentManager {
             // Generate all pairings
             const allPairings = generateBracketPairings(seedIndices);
 
+            const allPairingsSwapped = []
+            for (let p = 0; p < allPairings.length; p++) {
+                if (p % 2 === 0) {
+                    allPairingsSwapped.push(allPairings[p])
+                } else {
+                    allPairingsSwapped.push(allPairings[p].reverse())
+                }
+            }
             // Create the pairs
-            for (const [highIdx, lowIdx] of allPairings) {
+            for (const [highIdx, lowIdx] of allPairingsSwapped) {
                 const highSeed = activeTeams[highIdx];
                 const lowSeed = activeTeams[lowIdx];
                 const [aff, neg] = this.determineSides(highSeed, lowSeed, false);

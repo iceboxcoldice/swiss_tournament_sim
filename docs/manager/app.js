@@ -417,7 +417,9 @@ function generateBracketHTML() {
         html += `<div class="bracket-round-label">${round.label}</div>`;
         html += `<div class="bracket-matches">`;
 
+        let i = 0
         round.matches.forEach(match => {
+
             const affTeam = tournament.teams.find(t => t.id === match.aff_id);
             const negTeam = tournament.teams.find(t => t.id === match.neg_id);
 
@@ -427,7 +429,8 @@ function generateBracketHTML() {
 
             // Determine display order: higher seed (lower number) first
             let firstTeam, secondTeam, firstSide, secondSide, firstWon, secondWon;
-            if (affTeam.break_seed < negTeam.break_seed) {
+            if ((i % 2 == 0) && (affTeam.break_seed < negTeam.break_seed)
+                || (i % 2 == 1) && (affTeam.break_seed > negTeam.break_seed)) {
                 firstTeam = affTeam;
                 secondTeam = negTeam;
                 firstSide = 'Aff';
@@ -457,6 +460,7 @@ function generateBracketHTML() {
             if (secondWon) html += `<span class="win-indicator">✓</span>`;
             html += `</div>`;
             html += `</div>`;
+            i++;
         });
 
         html += `</div>`;
