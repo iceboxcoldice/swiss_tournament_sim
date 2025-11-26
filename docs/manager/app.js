@@ -499,41 +499,86 @@ function showStandings() {
 
     // Determine standings title and which standings to show
     const { num_elim_rounds } = tournament.data.config;
-    const showPrelimOnly = bracketHTML && num_elim_rounds > 0;
-    const standingsTitle = showPrelimOnly ? 'Preliminary Standings' : 'Current Standings';
-    const standingsData = showPrelimOnly ? tournament.getPreliminaryStandings() : standings;
+    const showTabs = bracketHTML && num_elim_rounds > 0;
 
-    tabContent.innerHTML = `
-        ${bracketHTML}
-        <div class="card">
-            <h3>${standingsTitle}</h3>
-            <table class="standings-table">
-                <thead>
+    const prelimStandings = showTabs ? tournament.getPreliminaryStandings() : null;
+    const overallStandings = standings;
+
+    // Generate standings table HTML
+    const generateStandingsTable = (standingsData, isPrelim) => `
+        <table class="standings-table">
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>Team</th>
+                    <th>Wins</th>
+                    <th>Score</th>
+                    <th>Buchholz</th>
+                    <th>Aff/Neg</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${standingsData.map((team, index) => `
                     <tr>
-                        <th>Rank</th>
-                        <th>Team</th>
-                        <th>Wins</th>
-                        <th>Score</th>
-                        <th>Buchholz</th>
-                        <th>Aff/Neg</th>
+                        <td>${index + 1}</td>
+                        <td><a href="#" onclick="showTeamDetails(${team.id}, 'standings'); return false;" class="team-link"><strong>${team.name}</strong></a></td>
+                        <td>${isPrelim ? team.prelim_wins : team.wins}</td>
+                        <td>${isPrelim ? team.prelim_score.toFixed(1) : team.score.toFixed(1)}</td>
+                        <td>${isPrelim ? team.prelim_buchholz.toFixed(1) : team.buchholz.toFixed(1)}</td>
+                        <td>${team.aff_count}/${team.neg_count}</td>
                     </tr>
-                </thead>
-                <tbody>
-                    ${standingsData.map((team, index) => `
-                        <tr>
-                            <td>${index + 1}</td>
-                            <td><a href="#" onclick="showTeamDetails(${team.id}, 'standings'); return false;" class="team-link"><strong>${team.name}</strong></a></td>
-                            <td>${showPrelimOnly ? team.prelim_wins : team.wins}</td>
-                            <td>${showPrelimOnly ? team.prelim_score.toFixed(1) : team.score.toFixed(1)}</td>
-                            <td>${showPrelimOnly ? team.prelim_buchholz.toFixed(1) : team.buchholz.toFixed(1)}</td>
-                            <td>${team.aff_count}/${team.neg_count}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        </div>
+                `).join('')}
+            </tbody>
+        </table>
     `;
+
+    if (showTabs) {
+        // Show both preliminary and overall standings with tabs
+        tabContent.innerHTML = `
+            ${bracketHTML}
+            <div class="card">
+                <h3>Standings</h3>
+                <div class="sub-tabs">
+                    <button class="sub-tab-btn active" onclick="switchStandingsTab('prelim')">Preliminary</button>
+                    <button class="sub-tab-btn" onclick="switchStandingsTab('overall')">Overall</button>
+                </div>
+                <div id="standings-prelim" class="standings-tab-content">
+                    ${generateStandingsTable(prelimStandings, true)}
+                </div>
+                <div id="standings-overall" class="standings-tab-content hidden">
+                    ${generateStandingsTable(overallStandings, false)}
+                </div>
+            </div>
+        `;
+    } else {
+        // Show only current standings (no tabs)
+        tabContent.innerHTML = `
+            <div class="card">
+                <h3>Current Standings</h3>
+                ${generateStandingsTable(overallStandings, false)}
+            </div>
+        `;
+    }
 }
+
+// Switch between preliminary and overall standings tabs
+window.switchStandingsTab = function (tabName) {
+    const prelimTab = document.getElementById('standings-prelim');
+    const overallTab = document.getElementById('standings-overall');
+    const buttons = document.querySelectorAll('.sub-tab-btn');
+
+    if (tabName === 'prelim') {
+        prelimTab.classList.remove('hidden');
+        overallTab.classList.add('hidden');
+        buttons[0].classList.add('active');
+        buttons[1].classList.remove('active');
+    } else {
+        prelimTab.classList.add('hidden');
+        overallTab.classList.remove('hidden');
+        buttons[0].classList.remove('active');
+        buttons[1].classList.add('active');
+    }
+};
 
 // Report Result
 window.reportResult = function (matchId, outcome) {
