@@ -521,3 +521,165 @@ header h1 {
     color: var(--danger-color);
     font-weight: bold;
 }
+
+/* Bracket Styles */
+.bracket {
+    display: flex;
+    gap: 3rem;
+    overflow-x: auto;
+    padding: 2rem 0;
+    align-items: flex-start;
+}
+
+.bracket-round {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-around;
+    min-width: 250px;
+    position: relative;
+}
+
+.bracket-round-label {
+    font-size: 1.1rem;
+    font-weight: 700;
+    text-align: center;
+    color: var(--primary);
+    margin-bottom: 1.5rem;
+    padding: 0.5rem;
+    background: var(--bg);
+    border-radius: 8px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.bracket-match {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    position: relative;
+}
+
+/* Spacing between matches increases in earlier rounds to create convergence */
+.bracket-round:nth-child(1) .bracket-match {
+    margin-bottom: 1rem;
+}
+
+.bracket-round:nth-child(2) .bracket-match {
+    margin-bottom: 3rem;
+}
+
+.bracket-round:nth-child(3) .bracket-match {
+    margin-bottom: 7rem;
+}
+
+.bracket-round:nth-child(4) .bracket-match {
+    margin-bottom: 15rem;
+}
+
+/* Add connecting lines */
+.bracket-match::after {
+    content: '';
+    position: absolute;
+    left: 100%;
+    top: 50%;
+    width: 3rem;
+    height: 2px;
+    background: var(--border);
+    transform: translateY(-50%);
+}
+
+/* No line after the last round */
+.bracket-round:last-child .bracket-match::after {
+    display: none;
+}
+
+.bracket-team {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    transition: all 0.2s;
+    position: relative;
+    z-index: 1;
+}
+
+.bracket-team:hover {
+    background: var(--bg-card-hover);
+    transform: translateX(-2px);
+}
+
+.bracket-team.winner {
+    border-color: var(--success);
+    background: rgba(16, 185, 129, 0.1);
+    font-weight: 600;
+}
+
+.bracket-team.loser {
+    opacity: 0.5;
+    text-decoration: line-through;
+}
+
+.bracket-team .seed {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    background: var(--secondary);
+    color: white;
+    border-radius: 50%;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.bracket-team.winner .seed {
+    background: var(--success);
+}
+
+.bracket-team .team-name {
+    flex: 1;
+}
+
+.bracket-team .side-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    background: var(--bg-card);
+    color: var(--text-muted);
+    margin-left: 0.5rem;
+}
+
+.bracket-team .win-indicator {
+    color: var(--success);
+    font-size: 1.2rem;
+    font-weight: 700;
+}
+
+/* Responsive bracket */
+@media (max-width: 768px) {
+    .bracket {
+        flex-direction: column;
+        gap: 2rem;
+    }
+
+    .bracket-round {
+        min-width: 100%;
+    }
+
+    .bracket-match::after {
+        display: none;
+    }
+
+    /* Reset spacing on mobile */
+    .bracket-round:nth-child(1) .bracket-match,
+    .bracket-round:nth-child(2) .bracket-match,
+    .bracket-round:nth-child(3) .bracket-match,
+    .bracket-round:nth-child(4) .bracket-match {
+        margin-bottom: 1rem;
+    }
+}

@@ -13,6 +13,7 @@ class Team {
         this.neg_count = 0;
         this.last_side = null;
         this.side_history = {}; // opponentId -> list of sides ('Aff'/'Neg')
+        this.break_seed = null; // Seed for elimination rounds
     }
 }
 
@@ -24,7 +25,7 @@ class TournamentManager {
     }
 
     // Initialize new tournament
-    init(numTeams, numRounds, teamNames = []) {
+    init(numTeams, numPrelimRounds, numElimRounds, teamNames = []) {
         this.teams = [];
         for (let i = 0; i < numTeams; i++) {
             const name = teamNames[i] || `Team ${i + 1}`;
@@ -34,10 +35,12 @@ class TournamentManager {
         this.data = {
             config: {
                 num_teams: numTeams,
-                num_rounds: numRounds
+                num_prelim_rounds: numPrelimRounds,
+                num_elim_rounds: numElimRounds,
+                num_rounds: numPrelimRounds + numElimRounds // Total rounds
             },
             current_round: 0,
-            rounds: Array.from({ length: numRounds }, (_, i) => ({ round_num: i + 1 })),
+            rounds: Array.from({ length: numPrelimRounds + numElimRounds }, (_, i) => ({ round_num: i + 1 })),
             matches: [],
             next_match_id: 1,
             pairing_file_content: "# Format: Round MatchID AffID NegID\n",
@@ -66,7 +69,12 @@ class TournamentManager {
         }
 
         // Generate pairings
-        const pairs = this.generateSwissPairings(roundNum);
+        let pairs;
+        if (roundNum <= this.data.config.num_prelim_rounds) {
+            pairs = this.generateSwissPairings(roundNum);
+        } else {
+            pairs = this.generateElimPairings(roundNum);
+        }
 
         // Create match objects
         const newMatches = [];
@@ -170,6 +178,132 @@ class TournamentManager {
                 const byeTeam = floaters[0];
                 byeTeam.score += 1;
                 byeTeam.opponents.push(-1);
+            }
+        }
+
+        return pairs;
+    }
+
+    // Generate Elimination Pairings (High vs Low)
+    generateElimPairings(roundNum) {
+        const { num_prelim_rounds, num_elim_rounds } = this.data.config;
+        const elimRoundIdx = roundNum - num_prelim_rounds;
+
+        // Validate break size
+        const breakSize = Math.pow(2, num_elim_rounds);
+        if (this.teams.length < breakSize) {
+            throw new Error(`Not enough teams for ${num_elim_rounds} elimination rounds (Need ${breakSize}, have ${this.teams.length})`);
+        }
+
+        let activeTeams = [];
+
+        if (elimRoundIdx === 1) {
+            // First elim round: Break the top teams
+            const standings = this.getStandings();
+            activeTeams = standings.slice(0, breakSize);
+
+            // Assign seeds
+            activeTeams.forEach((team, index) => {
+                team.break_seed = index + 1;
+            });
+        } else {
+            // Subsequent rounds: Get winners from previous round
+            const prevRound = roundNum - 1;
+            const prevMatches = this.data.matches.filter(m => m.round_num === prevRound);
+
+            // Check completeness
+            if (prevMatches.some(m => m.result === null)) {
+                throw new Error(`Round ${prevRound} is not complete`);
+            }
+
+            // Collect winners
+            activeTeams = prevMatches.map(m => {
+                return m.result === 'A' ? this.teams.find(t => t.id === m.aff_id)
+                    : this.teams.find(t => t.id === m.neg_id);
+            });
+
+            // Sort by break seed (High seed = Low number)
+            activeTeams.sort((a, b) => a.break_seed - b.break_seed);
+        }
+
+        // Pair using standard bracket structure
+        const pairs = [];
+        const numPairs = activeTeams.length / 2;
+
+        if (elimRoundIdx === 1) {
+            // First round: Standard bracket structure using recursive half-assignment
+            // Algorithm: Recursively split seeds into halves until each group has 1 seed
+            // Base case: [1,8] → pair them
+            // Recursive: [1,4,5,8] → split into [1,8] and [4,5], recurse on each
+
+            const n = activeTeams.length;
+
+            // Recursive function to generate bracket pairings
+            // Input: array of seed indices
+            // Output: array of [high, low] pairing indices in bracket order
+            const generateBracketPairings = (seeds) => {
+                if (seeds.length === 2) {
+                    // Base case: pair the two seeds
+                    return [[seeds[0], seeds[1]]];
+                }
+
+                // Recursive case: split into two halves
+                const half = seeds.length / 2;
+                const topHalf = [];
+                const bottomHalf = [];
+
+                // Distribute seeds into halves using alternating pattern
+                // Pattern: (1,n)→top, (2,n-1)→bottom, (3,n-2)→bottom, (4,n-3)→top, ...
+                for (let i = 0; i < half; i++) {
+                    const highSeed = seeds[i];
+                    const lowSeed = seeds[seeds.length - 1 - i];
+
+                    // Use modulo 4 pattern for assignment
+                    if (i % 4 === 0 || i % 4 === 3) {
+                        topHalf.push(highSeed);
+                        topHalf.push(lowSeed);
+                    } else {
+                        bottomHalf.push(highSeed);
+                        bottomHalf.push(lowSeed);
+                    }
+                }
+
+                // Sort each half
+                topHalf.sort((a, b) => a - b);
+                bottomHalf.sort((a, b) => a - b);
+
+                // Recursively generate pairings for each half
+                const topPairings = generateBracketPairings(topHalf);
+                const bottomPairings = generateBracketPairings(bottomHalf);
+
+                // Reverse bottom pairings for correct order
+                bottomPairings.reverse();
+
+                // Combine
+                return [...topPairings, ...bottomPairings];
+            };
+
+            // Generate seed indices array [0, 1, 2, ..., n-1]
+            const seedIndices = Array.from({ length: n }, (_, i) => i);
+
+            // Generate all pairings
+            const allPairings = generateBracketPairings(seedIndices);
+
+            // Create the pairs
+            for (const [highIdx, lowIdx] of allPairings) {
+                const highSeed = activeTeams[highIdx];
+                const lowSeed = activeTeams[lowIdx];
+                const [aff, neg] = this.determineSides(highSeed, lowSeed, false);
+                pairs.push([aff, neg]);
+            }
+        } else {
+            // Subsequent rounds: Pair winners sequentially (already in correct bracket order)
+            for (let i = 0; i < numPairs; i++) {
+                const team1 = activeTeams[i * 2];
+                const team2 = activeTeams[i * 2 + 1];
+
+                const [aff, neg] = this.determineSides(team1, team2, false);
+                pairs.push([aff, neg]);
             }
         }
 
@@ -418,7 +552,8 @@ class TournamentManager {
                 aff_count: t.aff_count,
                 neg_count: t.neg_count,
                 last_side: t.last_side,
-                side_history: t.side_history
+                side_history: t.side_history,
+                break_seed: t.break_seed
             }))
         };
     }
@@ -445,6 +580,7 @@ class TournamentManager {
             team.neg_count = t.neg_count;
             team.last_side = t.last_side || null;
             team.side_history = t.side_history || {};
+            team.break_seed = t.break_seed || null;
             return team;
         });
         this.saveToStorage();

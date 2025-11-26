@@ -23,6 +23,19 @@ const tabContent = document.getElementById('tabContent');
 let activeTab = null;
 let navigationHistory = []; // Track navigation history for back button
 
+// Helper: Get elimination round label
+function getElimRoundLabel(elimRoundNum, totalElimRounds) {
+    const roundsFromEnd = totalElimRounds - elimRoundNum + 1;
+
+    if (roundsFromEnd === 1) return "Finals";
+    if (roundsFromEnd === 2) return "Semifinals";
+    if (roundsFromEnd === 3) return "Quarterfinals";
+
+    // For earlier rounds, use "Round of N"
+    const teamsInRound = Math.pow(2, roundsFromEnd);
+    return `Round of ${teamsInRound}`;
+}
+
 // Initialize UI
 function initUI() {
     if (tournament.data) {
@@ -48,11 +61,12 @@ setupForm.addEventListener('submit', (e) => {
     e.preventDefault();
 
     const numTeams = parseInt(document.getElementById('numTeams').value);
-    const numRounds = parseInt(document.getElementById('numRounds').value);
+    const numPrelimRounds = parseInt(document.getElementById('numRounds').value);
+    const numElimRounds = parseInt(document.getElementById('numElimRounds').value);
     const teamNamesText = document.getElementById('teamNames').value;
     const teamNames = teamNamesText.split('\n').map(n => n.trim()).filter(n => n);
 
-    tournament.init(numTeams, numRounds, teamNames);
+    tournament.init(numTeams, numPrelimRounds, numElimRounds, teamNames);
 
     // Clear navigation history and hash for fresh start
     navigationHistory = [];
@@ -176,9 +190,12 @@ importFile.addEventListener('change', (e) => {
 // Update Dashboard
 function updateDashboard() {
     // Update tournament info
-    const { num_teams, num_rounds } = tournament.data.config;
+    const { num_teams, num_prelim_rounds, num_elim_rounds, num_rounds } = tournament.data.config;
     const { current_round } = tournament.data;
-    tournamentInfo.textContent = `${num_teams} teams • ${num_rounds} rounds • Current: Round ${current_round}`;
+    const roundsText = num_elim_rounds > 0
+        ? `${num_prelim_rounds} prelim + ${num_elim_rounds} elim rounds`
+        : `${num_rounds} rounds`;
+    tournamentInfo.textContent = `${num_teams} teams • ${roundsText} • Current: Round ${current_round}`;
 
     // Render tabs
     renderTabs();
@@ -192,10 +209,16 @@ function renderTabs() {
     mainTabs.innerHTML = '';
 
     // Create round tabs
+    const { num_prelim_rounds, num_elim_rounds } = tournament.data.config;
     for (let r = 1; r <= maxPairedRound; r++) {
         const btn = document.createElement('button');
         btn.className = 'tab-btn';
-        btn.textContent = `Round ${r}`;
+        if (r <= num_prelim_rounds) {
+            btn.textContent = `Round ${r}`;
+        } else {
+            const elimNum = r - num_prelim_rounds;
+            btn.textContent = getElimRoundLabel(elimNum, num_elim_rounds);
+        }
         btn.onclick = () => showRound(r);
         mainTabs.appendChild(btn);
     }
@@ -300,10 +323,24 @@ function showRound(roundNum) {
         navigationHistory.push(activeTab);
     }
 
+    // Determine round label
+    const { num_prelim_rounds, num_elim_rounds } = tournament.data.config;
+    let roundLabel;
+    let tabLabel;
+    if (roundNum <= num_prelim_rounds) {
+        roundLabel = `Round ${roundNum}`;
+        tabLabel = `Round ${roundNum}`;
+    } else {
+        const elimNum = roundNum - num_prelim_rounds;
+        const elimLabel = getElimRoundLabel(elimNum, num_elim_rounds);
+        roundLabel = elimLabel;
+        tabLabel = elimLabel;
+    }
+
     // Update active tab button
     const tabs = mainTabs.querySelectorAll('.tab-btn');
     tabs.forEach(btn => {
-        if (btn.textContent === `Round ${roundNum}`) {
+        if (btn.textContent === tabLabel) {
             btn.classList.add('active');
         } else {
             btn.classList.remove('active');
@@ -314,7 +351,7 @@ function showRound(roundNum) {
 
     tabContent.innerHTML = `
         <div class="card">
-            <h3>Round ${roundNum} Pairings</h3>
+            <h3>${roundLabel} Pairings</h3>
             <div class="pairings-grid">
                 ${matches.map(m => {
         const hasResult = m.result !== null;
@@ -351,6 +388,85 @@ function showRound(roundNum) {
     `;
 }
 
+// Generate Bracket HTML
+function generateBracketHTML() {
+    const { num_prelim_rounds, num_elim_rounds } = tournament.data.config;
+
+    // Check if prelims are complete
+    const prelimMatches = tournament.data.matches.filter(m => m.round_num <= num_prelim_rounds);
+    const prelimsComplete = prelimMatches.length > 0 && prelimMatches.every(m => m.result !== null);
+
+    if (!prelimsComplete || num_elim_rounds === 0) {
+        return ''; // No bracket to show
+    }
+
+    // Build bracket structure
+    const rounds = [];
+    for (let i = 1; i <= num_elim_rounds; i++) {
+        const roundNum = num_prelim_rounds + i;
+        const matches = tournament.data.matches.filter(m => m.round_num === roundNum);
+        const label = getElimRoundLabel(i, num_elim_rounds);
+        rounds.push({ roundNum, matches, label });
+    }
+
+    // Generate HTML
+    let html = '<div class="card" style="margin-bottom: 2rem;"><h3>Elimination Bracket</h3><div class="bracket">';
+
+    rounds.forEach((round, idx) => {
+        html += `<div class="bracket-round">`;
+        html += `<div class="bracket-round-label">${round.label}</div>`;
+        html += `<div class="bracket-matches">`;
+
+        round.matches.forEach(match => {
+            const affTeam = tournament.teams.find(t => t.id === match.aff_id);
+            const negTeam = tournament.teams.find(t => t.id === match.neg_id);
+
+            const affWon = match.result === 'A';
+            const negWon = match.result === 'N';
+            const hasResult = match.result !== null;
+
+            // Determine display order: higher seed (lower number) first
+            let firstTeam, secondTeam, firstSide, secondSide, firstWon, secondWon;
+            if (affTeam.break_seed < negTeam.break_seed) {
+                firstTeam = affTeam;
+                secondTeam = negTeam;
+                firstSide = 'Aff';
+                secondSide = 'Neg';
+                firstWon = affWon;
+                secondWon = negWon;
+            } else {
+                firstTeam = negTeam;
+                secondTeam = affTeam;
+                firstSide = 'Neg';
+                secondSide = 'Aff';
+                firstWon = negWon;
+                secondWon = affWon;
+            }
+
+            html += `<div class="bracket-match">`;
+            html += `<div class="bracket-team ${firstWon ? 'winner' : ''} ${hasResult && !firstWon ? 'loser' : ''}">`;
+            html += `<span class="seed">${firstTeam.break_seed}</span>`;
+            html += `<span class="team-name">${firstTeam.name}</span>`;
+            html += `<span class="side-label">${firstSide}</span>`;
+            if (firstWon) html += `<span class="win-indicator">✓</span>`;
+            html += `</div>`;
+            html += `<div class="bracket-team ${secondWon ? 'winner' : ''} ${hasResult && !secondWon ? 'loser' : ''}">`;
+            html += `<span class="seed">${secondTeam.break_seed}</span>`;
+            html += `<span class="team-name">${secondTeam.name}</span>`;
+            html += `<span class="side-label">${secondSide}</span>`;
+            if (secondWon) html += `<span class="win-indicator">✓</span>`;
+            html += `</div>`;
+            html += `</div>`;
+        });
+
+        html += `</div>`;
+        html += `</div>`;
+    });
+
+    html += '</div></div>';
+    return html;
+}
+
 // Show Standings
 function showStandings() {
     activeTab = 'standings';
@@ -378,9 +494,17 @@ function showStandings() {
         return;
     }
 
+    // Generate bracket if applicable
+    const bracketHTML = generateBracketHTML();
+
+    // Determine standings title
+    const { num_elim_rounds } = tournament.data.config;
+    const standingsTitle = (bracketHTML && num_elim_rounds > 0) ? 'Preliminary Standings' : 'Current Standings';
+
     tabContent.innerHTML = `
+        ${bracketHTML}
         <div class="card">
-            <h3>Current Standings</h3>
+            <h3>${standingsTitle}</h3>
             <table class="standings-table">
                 <thead>
                     <tr>
