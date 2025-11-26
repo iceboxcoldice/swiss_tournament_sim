@@ -528,15 +528,24 @@ header h1 {
     gap: 3rem;
     overflow-x: auto;
     padding: 2rem 0;
-    align-items: flex-start;
+    align-items: center;
+    /* Center align rounds vertically */
 }
 
 .bracket-round {
     display: flex;
     flex-direction: column;
-    justify-content: space-around;
+    justify-content: center;
+    /* Center matches within each round */
     min-width: 250px;
     position: relative;
+}
+
+.bracket-matches {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    /* Center matches vertically */
 }
 
 .bracket-round-label {
@@ -548,9 +557,6 @@ header h1 {
     padding: 0.5rem;
     background: var(--bg);
     border-radius: 8px;
-    position: sticky;
-    top: 0;
-    z-index: 10;
 }
 
 .bracket-match {
