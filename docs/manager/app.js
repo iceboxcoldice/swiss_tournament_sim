@@ -478,17 +478,16 @@ function showStandings() {
         navigationHistory.push(activeTab);
     }
 
-    // Update active tab button
-    const tabs = mainTabs.querySelectorAll('.tab-btn');
-    tabs.forEach(btn => {
-        if (btn.textContent === 'Standings') {
+    // Update active state
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        if (btn.dataset.tab === 'standings') {
             btn.classList.add('active');
         } else {
             btn.classList.remove('active');
         }
     });
 
-    const standings = tournament.getStandings();
+    const standings = tournament.getStandings(); // Get full standings for initial check
 
     if (standings.every(t => t.score === 0)) {
         tabContent.innerHTML = '<div class="card"><p class="text-muted">No results yet. Generate pairings and enter results to see standings.</p></div>';
@@ -498,9 +497,11 @@ function showStandings() {
     // Generate bracket if applicable
     const bracketHTML = generateBracketHTML();
 
-    // Determine standings title
+    // Determine standings title and which standings to show
     const { num_elim_rounds } = tournament.data.config;
-    const standingsTitle = (bracketHTML && num_elim_rounds > 0) ? 'Preliminary Standings' : 'Current Standings';
+    const showPrelimOnly = bracketHTML && num_elim_rounds > 0;
+    const standingsTitle = showPrelimOnly ? 'Preliminary Standings' : 'Current Standings';
+    const standingsData = showPrelimOnly ? tournament.getPreliminaryStandings() : standings;
 
     tabContent.innerHTML = `
         ${bracketHTML}
@@ -518,13 +519,13 @@ function showStandings() {
                     </tr>
                 </thead>
                 <tbody>
-                    ${standings.map((team, index) => `
+                    ${standingsData.map((team, index) => `
                         <tr>
                             <td>${index + 1}</td>
                             <td><a href="#" onclick="showTeamDetails(${team.id}, 'standings'); return false;" class="team-link"><strong>${team.name}</strong></a></td>
-                            <td>${team.wins}</td>
-                            <td>${team.score.toFixed(1)}</td>
-                            <td>${team.buchholz.toFixed(1)}</td>
+                            <td>${showPrelimOnly ? team.prelim_wins : team.wins}</td>
+                            <td>${showPrelimOnly ? team.prelim_score.toFixed(1) : team.score.toFixed(1)}</td>
+                            <td>${showPrelimOnly ? team.prelim_buchholz.toFixed(1) : team.buchholz.toFixed(1)}</td>
                             <td>${team.aff_count}/${team.neg_count}</td>
                         </tr>
                     `).join('')}

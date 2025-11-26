@@ -551,6 +551,73 @@ class TournamentManager {
         return standings;
     }
 
+    // Get preliminary standings (only considering preliminary rounds)
+    getPreliminaryStandings() {
+        const { num_prelim_rounds } = this.data.config;
+
+        // Create temporary team stats based only on preliminary rounds
+        const prelimStats = this.teams.map(team => {
+            const prelimMatches = this.data.matches.filter(m =>
+                m.round_num <= num_prelim_rounds &&
+                (m.aff_id === team.id || m.neg_id === team.id)
+            );
+
+            let wins = 0;
+            let score = 0;
+            const opponentIds = [];
+
+            prelimMatches.forEach(match => {
+                if (match.result === null) return;
+
+                const isAff = match.aff_id === team.id;
+                const won = (isAff && match.result === 'A') || (!isAff && match.result === 'N');
+
+                if (won) {
+                    wins++;
+                    score++;
+                }
+
+                // Track opponents for Buchholz
+                opponentIds.push(isAff ? match.neg_id : match.aff_id);
+            });
+
+            // Calculate Buchholz based on preliminary opponents only
+            let buchholz = 0;
+            opponentIds.forEach(oppId => {
+                const opponent = this.teams.find(t => t.id === oppId);
+                if (opponent) {
+                    // Count opponent's preliminary wins
+                    const oppPrelimMatches = this.data.matches.filter(m =>
+                        m.round_num <= num_prelim_rounds &&
+                        (m.aff_id === oppId || m.neg_id === oppId) &&
+                        m.result !== null
+                    );
+                    const oppWins = oppPrelimMatches.filter(m =>
+                        (m.aff_id === oppId && m.result === 'A') ||
+                        (m.neg_id === oppId && m.result === 'N')
+                    ).length;
+                    buchholz += oppWins;
+                }
+            });
+
+            return {
+                ...team,
+                prelim_wins: wins,
+                prelim_score: score,
+                prelim_buchholz: buchholz
+            };
+        });
+
+        // Sort by preliminary stats
+        prelimStats.sort((a, b) => {
+            if (b.prelim_score !== a.prelim_score) return b.prelim_score - a.prelim_score;
+            if (b.prelim_buchholz !== a.prelim_buchholz) return b.prelim_buchholz - a.prelim_buchholz;
+            return b.prelim_wins - a.prelim_wins;
+        });
+
+        return prelimStats;
+    }
+
     // Get matches for a round
     getRoundMatches(roundNum) {
         return this.data.matches.filter(m => m.round_num === roundNum);
