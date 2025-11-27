@@ -384,3 +384,76 @@ function displayRankFromHistoryResults(results, history) {
     document.getElementById('rankHistory_results').style.display = 'block';
     document.getElementById('rankHistory_results').scrollIntoView({ behavior: 'smooth' });
 }
+
+// Top-N from History Form Handler
+document.getElementById('topNHistoryForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const numTeams = parseInt(document.getElementById('topNHistory_teams').value);
+    const numRounds = parseInt(document.getElementById('topNHistory_rounds').value);
+    const history = document.getElementById('topNHistory_history').value.replace(/\s/g, '').toUpperCase();
+    const topN = parseInt(document.getElementById('topNHistory_topN').value);
+    const numSims = parseInt(document.getElementById('topNHistory_sims').value);
+    const useBuchholz = document.getElementById('topNHistory_buchholz').checked;
+    const winModel = document.getElementById('topNHistory_winModel').value;
+
+    if (!/^[WL]+$/.test(history)) {
+        alert('History must contain only W and L characters');
+        return;
+    }
+
+    if (history.length > numRounds) {
+        alert('History length cannot exceed number of rounds');
+        return;
+    }
+
+    if (topN > numTeams) {
+        alert('Top N cannot exceed number of teams');
+        return;
+    }
+
+    document.getElementById('topNHistory_progress').style.display = 'block';
+    document.getElementById('topNHistory_results').style.display = 'none';
+    e.target.querySelector('button').disabled = true;
+
+    try {
+        const results = await runTopNFromHistorySimulation(
+            { numTeams, numRounds, history, topN, numSims, useBuchholz, winModel },
+            (current, total) => {
+                const progress = (current / total) * 100;
+                document.getElementById('topNHistory_progressFill').style.width = progress + '%';
+                document.getElementById('topNHistory_progressText').textContent = `${current} / ${total} simulations...`;
+            }
+        );
+
+        displayTopNFromHistoryResults(results, history, topN);
+    } catch (error) {
+        alert('Error: ' + error.message);
+    } finally {
+        document.getElementById('topNHistory_progress').style.display = 'none';
+        e.target.querySelector('button').disabled = false;
+    }
+});
+
+function displayTopNFromHistoryResults(results, history, topN) {
+    const { totalTeamsWithHistory, teamsInTopN, numSims } = results;
+
+    document.getElementById('topNHistory_subtitle').textContent = `For teams with history "${history}"`;
+
+    if (totalTeamsWithHistory === 0) {
+        alert('No teams found with that history');
+        return;
+    }
+
+    const probability = (teamsInTopN / totalTeamsWithHistory) * 100;
+    const avgTeamsPerTournament = totalTeamsWithHistory / numSims;
+
+    document.getElementById('topNHistory_probability').textContent = probability.toFixed(2) + '%';
+    document.getElementById('topNHistory_inTopN').textContent = `${teamsInTopN} / ${totalTeamsWithHistory}`;
+    document.getElementById('topNHistory_totalTeams').textContent = totalTeamsWithHistory.toLocaleString();
+    document.getElementById('topNHistory_avgTeams').textContent = avgTeamsPerTournament.toFixed(2);
+
+    document.getElementById('topNHistory_results').style.display = 'block';
+    document.getElementById('topNHistory_results').scrollIntoView({ behavior: 'smooth' });
+}
+

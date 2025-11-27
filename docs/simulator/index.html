@@ -345,6 +345,7 @@
             <div class="tab" onclick="switchTab('winDist')">Win Distribution</div>
             <div class="tab" onclick="switchTab('rankFromWins')">Rank from Wins</div>
             <div class="tab" onclick="switchTab('rankFromHistory')">Rank from History</div>
+            <div class="tab" onclick="switchTab('topNFromHistory')">Top-N from History</div>
         </div>
 
         <!-- Head-to-Head Tab -->
@@ -779,6 +780,94 @@
                     <tbody id="rankHistory_tableBody">
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <!-- Top-N from History Tab -->
+        <div id="topNFromHistory" class="tab-content">
+            <div class="card">
+                <h2 style="margin-bottom: 1.5rem;">Top-N Probability from History</h2>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">Calculate the probability of finishing in
+                    the top N positions given a specific win/loss history.</p>
+
+                <form id="topNHistoryForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="topNHistory_teams">Number of Teams</label>
+                            <input type="number" id="topNHistory_teams" value="64" min="2" max="500" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="topNHistory_rounds">Number of Rounds</label>
+                            <input type="number" id="topNHistory_rounds" value="5" min="1" max="20" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="topNHistory_history">History (e.g., "W W L")</label>
+                            <input type="text" id="topNHistory_history" value="W W L" placeholder="e.g., W W L"
+                                required>
+                        </div>
+                        <div class="form-group">
+                            <label for="topNHistory_topN">Top N Positions</label>
+                            <input type="number" id="topNHistory_topN" value="16" min="1" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="topNHistory_sims">Simulations</label>
+                            <input type="number" id="topNHistory_sims" value="1000" min="100" max="10000" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="topNHistory_winModel">Win Model</label>
+                            <select id="topNHistory_winModel">
+                                <option value="elo" selected>Elo (Realistic)</option>
+                                <option value="linear">Linear</option>
+                                <option value="deterministic">Deterministic</option>
+                            </select>
+                        </div>
+                        <div class="form-group checkbox-group" style="align-self: end;">
+                            <input type="checkbox" id="topNHistory_buchholz" checked>
+                            <label for="topNHistory_buchholz">Use Buchholz Pairing</label>
+                        </div>
+                    </div>
+
+                    <button type="submit">Run Simulation</button>
+
+                    <div class="progress-container" id="topNHistory_progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="topNHistory_progressFill"></div>
+                        </div>
+                        <div class="progress-text" id="topNHistory_progressText">Running simulations...</div>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card results" id="topNHistory_results">
+                <div class="results-header">
+                    <h2>Top-N Probability Results</h2>
+                    <p id="topNHistory_subtitle" style="color: var(--text-muted);"></p>
+                </div>
+
+                <div class="stats-grid" style="margin-bottom: 2rem;">
+                    <div class="stat-card">
+                        <div class="stat-label">Top N Probability</div>
+                        <div class="stat-value primary" id="topNHistory_probability"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Teams in Top N</div>
+                        <div class="stat-value secondary" id="topNHistory_inTopN"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Total Teams with History</div>
+                        <div class="stat-value" id="topNHistory_totalTeams"></div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Avg Teams per Tournament</div>
+                        <div class="stat-value" id="topNHistory_avgTeams"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

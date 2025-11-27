@@ -331,3 +331,36 @@ async function runRankFromHistorySimulation(params, progressCallback) {
 
     return { rankCounts, totalTeams, numSims };
 }
+
+// Top-N from History Simulation
+async function runTopNFromHistorySimulation(params, progressCallback) {
+    const { numTeams, numRounds, history, topN, numSims, useBuchholz, winModel } = params;
+
+    let totalTeamsWithHistory = 0;
+    let teamsInTopN = 0;
+
+    for (let sim = 0; sim < numSims; sim++) {
+        const teams = runTournament(numTeams, numRounds, useBuchholz, winModel);
+
+        // teams is already sorted by score and buchholz
+        const topNTeamIds = new Set(teams.slice(0, topN).map(t => t.id));
+
+        for (const team of teams) {
+            if (team.history.length >= history.length &&
+                team.history.slice(0, history.length).join('') === history) {
+                totalTeamsWithHistory++;
+                if (topNTeamIds.has(team.id)) {
+                    teamsInTopN++;
+                }
+            }
+        }
+
+        if ((sim + 1) % 100 === 0) {
+            progressCallback(sim + 1, numSims);
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+    }
+
+    return { totalTeamsWithHistory, teamsInTopN, numSims };
+}
+
