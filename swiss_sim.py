@@ -18,7 +18,9 @@ class Team:
     last_side: Optional[str] = None
     side_history: dict = field(default_factory=dict)  # Opponent ID -> List of sides played
     history: list = field(default_factory=list)  # Win/Loss sequence ("W"/"L")
+    history: list = field(default_factory=list)  # Win/Loss sequence ("W"/"L")
     opponent_history: list = field(default_factory=list)  # List of opponent IDs by round
+    break_seed: Optional[int] = None # Seed for elimination rounds
     
     def __hash__(self):
         return hash(self.id)

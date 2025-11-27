@@ -2,12 +2,36 @@
 
 A collection of Python scripts to simulate **Policy Debate tournaments** using Swiss-system pairing rules. Policy Debate tournaments closely follow Swiss system conventions with additional side constraints (Affirmative/Negative) and specific pairing rules.
 
-## � Tournament Manager
+## 📋 Tournament Manager
 
-`tournament_manager.py` is a command‑line tool for running and managing real‑world tournaments. It lets you initialise a tournament, generate pairings round‑by‑round, record match results, and view current standings. Unlike the simulation scripts, this tool does **not** perform Monte‑Carlo simulations; it simply tracks the actual progress of a live tournament.
+`tournament_manager.py` is a command-line tool for running and managing real-world tournaments. It lets you initialize a tournament, generate pairings round-by-round, record match results, and view current standings. Unlike the simulation scripts, this tool does **not** perform Monte-Carlo simulations; it simply tracks the actual progress of a live tournament.
+
+**Features:**
+- **Elimination Rounds**: Support for single-elimination brackets after preliminary rounds
+- **Historical Standings**: View standings as they were after any specific round
+- **Flexible Reporting**: Interactive, file-based, or single-match result entry
+- **Export/Import**: Export tournament state and results to files
+
+**Basic Usage:**
+```bash
+# Initialize tournament (8 teams, 4 prelim rounds, 2 elim rounds = semifinals + finals)
+./tournament_manager.py init 8 4 --elim-rounds 2 --names teams.txt
+
+# Generate pairings for round 1
+./tournament_manager.py pair 1
+
+# Report results
+./tournament_manager.py report 1 --file results.txt
+
+# View current standings
+./tournament_manager.py standings
+
+# View standings after round 2
+./tournament_manager.py standings 2
+```
 
 
-## �🌐 Web Application
+## 🌐 Web Application
 
 **Try it online:** [https://iceboxcoldice.github.io/swiss_tournament_sim/](https://iceboxcoldice.github.io/swiss_tournament_sim/)
 
@@ -135,8 +159,30 @@ python3 head_to_head_probability.py 128 5 "W W" "W L"
 
 Specify minimum matchups needed (default: 100):
 ```bash
+```bash
 python3 head_to_head_probability.py 167 7 "W W L" "W L W" --min-matchups 200
 ```
+
+---
+
+### 6. `top_n_probability_from_history.py`
+Calculates the probability of finishing in the top N positions given a specific win/loss history. Useful for determining advancement chances based on current tournament performance.
+
+**Usage:**
+```bash
+python3 top_n_probability_from_history.py <teams> <rounds> <history_string> <top_n> [simulations] [options]
+```
+
+**Example:**
+Calculate the probability of finishing in the top 16 with a "WWL" (2-1) record:
+```bash
+python3 top_n_probability_from_history.py 64 5 "WWL" 16 1000
+```
+
+**Output:**
+- Probability percentage of finishing in top N
+- Number of teams with matching history that finished in top N
+- Average teams per tournament with the given history
 
 ## Common Options
 
