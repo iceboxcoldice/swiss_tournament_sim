@@ -2,9 +2,15 @@
 // Ported from Python tournament_manager.py
 
 class Team {
-    constructor(id, name) {
+    constructor(id, name, institution = '', members = []) {
         this.id = id;
         this.name = name;
+        this.institution = institution || 'Unknown';
+        // Each member has {name: string, id: number}
+        this.members = members.length === 2 ? members : [
+            { name: `Member 1`, id: 1 },
+            { name: `Member 2`, id: 2 }
+        ];
         this.wins = 0;
         this.score = 0;
         this.buchholz = 0;
@@ -14,6 +20,8 @@ class Team {
         this.last_side = null;
         this.side_history = {}; // opponentId -> list of sides ('Aff'/'Neg')
         this.break_seed = null; // Seed for elimination rounds
+        // Speaker points history: array of {round: number, points: [number, number]}
+        this.speaker_points_history = [];
     }
 }
 
@@ -25,11 +33,18 @@ class TournamentManager {
     }
 
     // Initialize new tournament
-    init(numTeams, numPrelimRounds, numElimRounds, teamNames = []) {
+    // teamDetails: array of {name, institution, members: [{name}, {name}]}
+    init(numTeams, numPrelimRounds, numElimRounds, teamDetails = []) {
         this.teams = [];
         for (let i = 0; i < numTeams; i++) {
-            const name = teamNames[i] || `Team ${i + 1}`;
-            this.teams.push(new Team(i, name));
+            const detail = teamDetails[i] || {};
+            const name = detail.name || `Team ${i + 1}`;
+            const institution = detail.institution || 'Unknown';
+            const members = detail.members && detail.members.length === 2
+                ? detail.members.map((m, idx) => ({ name: m.name || `Member ${idx + 1}`, id: idx + 1 }))
+                : [{ name: `Member 1`, id: 1 }, { name: `Member 2`, id: 2 }];
+
+            this.teams.push(new Team(i, name, institution, members));
         }
 
         this.data = {
@@ -626,6 +641,126 @@ class TournamentManager {
         return this.data.matches.filter(m => m.round_num === roundNum);
     }
 
+    // Store speaker points for a match
+    // speakerPoints: {affPoints: [number, number], negPoints: [number, number]}
+    storeSpeakerPoints(matchId, speakerPoints) {
+        const match = this.data.matches.find(m => m.match_id === matchId);
+        if (!match) {
+            throw new Error(`Match ${matchId} not found`);
+        }
+
+        // Validate speaker points (0-30 range), skip null values
+        const allPoints = [...speakerPoints.affPoints, ...speakerPoints.negPoints];
+        for (const points of allPoints) {
+            if (points !== null && points !== undefined && (points < 0 || points > 30)) {
+                throw new Error(`Speaker points must be between 0 and 30, got ${points}`);
+            }
+        }
+
+        // Store in match object
+        match.speaker_points = speakerPoints;
+
+        // Update team speaker points history
+        const affTeam = this.teams.find(t => t.id === match.aff_id);
+        const negTeam = this.teams.find(t => t.id === match.neg_id);
+
+        // Remove existing entry for this round if it exists
+        affTeam.speaker_points_history = affTeam.speaker_points_history.filter(
+            entry => entry.round !== match.round_num
+        );
+        negTeam.speaker_points_history = negTeam.speaker_points_history.filter(
+            entry => entry.round !== match.round_num
+        );
+
+        // Add new entry
+        affTeam.speaker_points_history.push({
+            round: match.round_num,
+            points: speakerPoints.affPoints
+        });
+        negTeam.speaker_points_history.push({
+            round: match.round_num,
+            points: speakerPoints.negPoints
+        });
+
+        this.saveToStorage();
+    }
+
+    // Get participant standings
+    // method: 'total' | 'drop-1' | 'drop-2'
+    getParticipantStandings(method = 'total') {
+        const participants = [];
+
+        for (const team of this.teams) {
+            for (let memberIdx = 0; memberIdx < team.members.length; memberIdx++) {
+                const member = team.members[memberIdx];
+
+                // Collect all speaker points for this member from preliminary rounds only
+                const prelimPoints = team.speaker_points_history
+                    .filter(entry => entry.round <= this.data.config.num_prelim_rounds)
+                    .map(entry => entry.points[memberIdx])
+                    .filter(p => p !== undefined && p !== null);
+
+                if (prelimPoints.length === 0) continue; // Skip if no points recorded
+
+                let adjustedScore = 0;
+                const totalPoints = prelimPoints.reduce((sum, p) => sum + p, 0);
+
+                if (method === 'total') {
+                    adjustedScore = totalPoints;
+                } else if (method === 'drop-1') {
+                    if (prelimPoints.length <= 2) {
+                        adjustedScore = totalPoints; // Not enough to drop
+                    } else {
+                        const sorted = [...prelimPoints].sort((a, b) => a - b);
+                        // Drop lowest and highest
+                        adjustedScore = sorted.slice(1, -1).reduce((sum, p) => sum + p, 0);
+                    }
+                } else if (method === 'drop-2') {
+                    if (prelimPoints.length <= 4) {
+                        adjustedScore = totalPoints; // Not enough to drop
+                    } else {
+                        const sorted = [...prelimPoints].sort((a, b) => a - b);
+                        // Drop two lowest and two highest
+                        adjustedScore = sorted.slice(2, -2).reduce((sum, p) => sum + p, 0);
+                    }
+                }
+
+                participants.push({
+                    teamId: team.id,
+                    teamName: team.name,
+                    institution: team.institution,
+                    memberId: member.id,
+                    memberName: member.name,
+                    totalPoints: totalPoints,
+                    adjustedScore: adjustedScore,
+                    roundScores: prelimPoints
+                });
+            }
+        }
+
+        // Sort by adjusted score descending
+        participants.sort((a, b) => {
+            if (b.adjustedScore !== a.adjustedScore) return b.adjustedScore - a.adjustedScore;
+            if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
+            return a.memberName.localeCompare(b.memberName);
+        });
+
+        return participants;
+    }
+
+    // Check if preliminary rounds are complete
+    arePrelimRoundsComplete() {
+        const { num_prelim_rounds } = this.data.config;
+        for (let r = 1; r <= num_prelim_rounds; r++) {
+            const roundMatches = this.data.matches.filter(m => m.round_num === r);
+            if (roundMatches.length === 0 || roundMatches.some(m => m.result === null)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+
     // Export tournament data
     exportData() {
         // Ensure content exists (migration)
@@ -637,6 +772,8 @@ class TournamentManager {
             teams: this.teams.map(t => ({
                 id: t.id,
                 name: t.name,
+                institution: t.institution,
+                members: t.members,
                 wins: t.wins,
                 score: t.score,
                 buchholz: t.buchholz,
@@ -645,7 +782,8 @@ class TournamentManager {
                 neg_count: t.neg_count,
                 last_side: t.last_side,
                 side_history: t.side_history,
-                break_seed: t.break_seed
+                break_seed: t.break_seed,
+                speaker_points_history: t.speaker_points_history
             }))
         };
     }
@@ -663,7 +801,13 @@ class TournamentManager {
         this.validateResultRedundancy(this.data.matches, this.data.result_file_content);
 
         this.teams = data.teams.map(t => {
-            const team = new Team(t.id, t.name);
+            // Migration: Handle old tournaments without new fields
+            const institution = t.institution || 'Unknown';
+            const members = t.members && t.members.length === 2
+                ? t.members
+                : [{ name: 'Member 1', id: 1 }, { name: 'Member 2', id: 2 }];
+
+            const team = new Team(t.id, t.name, institution, members);
             team.wins = t.wins;
             team.score = t.score;
             team.buchholz = t.buchholz;
@@ -673,6 +817,7 @@ class TournamentManager {
             team.last_side = t.last_side || null;
             team.side_history = t.side_history || {};
             team.break_seed = t.break_seed || null;
+            team.speaker_points_history = t.speaker_points_history || [];
             return team;
         });
         this.saveToStorage();

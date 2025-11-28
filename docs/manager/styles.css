@@ -186,9 +186,6 @@ header h1 {
     padding: 1rem;
     border-radius: 8px;
     border: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
 }
 
 .pairing-teams {
@@ -687,5 +684,202 @@ header h1 {
     .bracket-round:nth-child(3) .bracket-match,
     .bracket-round:nth-child(4) .bracket-match {
         margin-bottom: 1rem;
+    }
+}
+
+/* Pairing Sections - Three Equal Boxes */
+.pairing-sections {
+    display: flex;
+    align-items: stretch;
+    gap: 1rem;
+}
+
+.team-section,
+.match-section {
+    flex: 1;
+    padding: 0.75rem;
+    border-radius: 8px;
+    border: 2px solid var(--border);
+    display: flex;
+    flex-direction: column;
+}
+
+.team-aff-section {
+    background: rgba(96, 165, 250, 0.05);
+    border-color: rgba(96, 165, 250, 0.3);
+}
+
+.team-neg-section {
+    background: rgba(244, 114, 182, 0.05);
+    border-color: rgba(244, 114, 182, 0.3);
+}
+
+.match-section {
+    background: rgba(139, 92, 246, 0.05);
+    border-color: rgba(139, 92, 246, 0.3);
+}
+
+.team-header,
+.match-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+}
+
+.side-label {
+    color: var(--text-muted);
+    font-weight: normal;
+    font-size: 0.9rem;
+}
+
+.win-indicator {
+    color: var(--success);
+    font-size: 1.1rem;
+    margin-left: auto;
+}
+
+.match-id {
+    font-weight: 600;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.members-list,
+.match-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    flex: 1;
+}
+
+.match-content {
+    justify-content: center;
+}
+
+.member-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    background: var(--bg);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    border: 1px solid transparent;
+    transition: border-color 0.2s;
+}
+
+.member-item:hover {
+    border-color: var(--border);
+}
+
+.member-name {
+    flex: 1;
+    color: var(--text);
+}
+
+.speaker-point-value {
+    font-weight: 600;
+    color: var(--success);
+    min-width: 35px;
+    text-align: right;
+    font-size: 0.9rem;
+}
+
+.speaker-point-input-container {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.speaker-points-input-inline {
+    width: 70px;
+    padding: 0.3rem 0.5rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 0.85rem;
+    transition: border-color 0.2s;
+}
+
+.speaker-points-input-inline:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+/* Match Result Buttons and Status */
+.result-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.result-status {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.result-winner {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.correction-buttons {
+    display: flex;
+    gap: 0.5rem;
+}
+
+/* Participant Standings */
+.participant-standings-section {
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 2px solid var(--border);
+}
+
+.method-selector {
+    padding: 0.5rem 1rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.method-selector:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+/* Responsive pairing teams */
+@media (max-width: 768px) {
+    .pairing-teams {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1rem;
+    }
+
+    .vs-divider {
+        text-align: center;
+    }
+
+    .members-list {
+        margin-left: 0.5rem;
+    }
+
+    .member-item {
+        flex-wrap: wrap;
+    }
+
+    .speaker-point-input-container {
+        width: 100%;
+        margin-top: 0.3rem;
     }
 }

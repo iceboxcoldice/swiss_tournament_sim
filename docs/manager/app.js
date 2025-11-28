@@ -63,10 +63,37 @@ setupForm.addEventListener('submit', (e) => {
     const numTeams = parseInt(document.getElementById('numTeams').value);
     const numPrelimRounds = parseInt(document.getElementById('numRounds').value);
     const numElimRounds = parseInt(document.getElementById('numElimRounds').value);
-    const teamNamesText = document.getElementById('teamNames').value;
-    const teamNames = teamNamesText.split('\n').map(n => n.trim()).filter(n => n);
+    const teamDataText = document.getElementById('teamData').value;
 
-    tournament.init(numTeams, numPrelimRounds, numElimRounds, teamNames);
+    // Parse team data: Format is "Team Name | Institution | Member 1 | Member 2"
+    const teamDetails = [];
+    const lines = teamDataText.split('\n').map(l => l.trim()).filter(l => l);
+
+    for (let i = 0; i < numTeams; i++) {
+        if (i < lines.length && lines[i]) {
+            const parts = lines[i].split('|').map(p => p.trim());
+            teamDetails.push({
+                name: parts[0] || `Team ${i + 1}`,
+                institution: parts[1] || 'Unknown',
+                members: [
+                    { name: parts[2] || `Member 1` },
+                    { name: parts[3] || `Member 2` }
+                ]
+            });
+        } else {
+            // No data for this team, use defaults
+            teamDetails.push({
+                name: `Team ${i + 1}`,
+                institution: 'Unknown',
+                members: [
+                    { name: `Member 1` },
+                    { name: `Member 2` }
+                ]
+            });
+        }
+    }
+
+    tournament.init(numTeams, numPrelimRounds, numElimRounds, teamDetails);
 
     // Clear navigation history and hash for fresh start
     navigationHistory = [];
@@ -74,6 +101,19 @@ setupForm.addEventListener('submit', (e) => {
     activeTab = null;
 
     showDashboard();
+});
+
+// Auto-populate button handler
+document.getElementById('autoPopulateBtn').addEventListener('click', () => {
+    const numTeams = parseInt(document.getElementById('numTeams').value) || 8;
+    const teamDataTextarea = document.getElementById('teamData');
+
+    const lines = [];
+    for (let i = 1; i <= numTeams; i++) {
+        lines.push(`Team ${i} | Institution ${i} | Member ${i}A | Member ${i}B`);
+    }
+
+    teamDataTextarea.value = lines.join('\n');
 });
 
 // Generic Confirmation Modal
@@ -358,6 +398,7 @@ function showRound(roundNum) {
     });
 
     const matches = tournament.getRoundMatches(roundNum);
+    const isPrelimRound = roundNum <= num_prelim_rounds;
 
     tabContent.innerHTML = `
         <div class="card">
@@ -366,29 +407,95 @@ function showRound(roundNum) {
                 ${matches.map(m => {
         const hasResult = m.result !== null;
 
+        // Get team members for speaker points
+        const affTeam = tournament.teams.find(t => t.id === m.aff_id);
+        const negTeam = tournament.teams.find(t => t.id === m.neg_id);
+
+        // Get existing speaker points if any
+        const existingSP = m.speaker_points || null;
+        const affPoints = existingSP ? existingSP.affPoints : [null, null];
+        const negPoints = existingSP ? existingSP.negPoints : [null, null];
+
+        // Helper function to render member with speaker points
+        const renderMember = (member, points, matchId, index) => {
+            const hasPoints = points !== null && points !== undefined;
+            const inputId = `sp_input_${matchId}_${index}`;
+
+            return `
+                <div class="member-item" id="sp_item_${matchId}_${index}">
+                    <span class="member-name">${member.name}</span>
+                    ${isPrelimRound ? `
+                        ${!hasPoints ? `
+                            <button class="btn btn-sm btn-success" onclick="showSpeakerPointInput('${matchId}', '${index}')" title="Add Speaker Points">+</button>
+                        ` : `
+                            <span class="speaker-point-value">${points.toFixed(1)}</span>
+                            <div class="correction-buttons">
+                                <button class="btn btn-sm btn-warning" onclick="showSpeakerPointInput('${matchId}', '${index}')" title="Edit">✏</button>
+                                <button class="btn btn-sm btn-danger" onclick="unsubmitSpeakerPoint('${matchId}', '${index}')" title="Unsubmit">✕</button>
+                            </div>
+                        `}
+                        <div class="speaker-point-input-container hidden" id="${inputId}_container">
+                            <input type="number" 
+                                id="${inputId}" 
+                                class="speaker-points-input-inline" 
+                                min="0" max="30" step="0.1"
+                                value="${hasPoints ? points : ''}"
+                                placeholder="0-30"
+                                onblur="submitSpeakerPoint('${matchId}', '${index}')">
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        };
+
         return `
                         <div class="pairing-item">
-                            <div class="pairing-teams">
-                                <div><a href="#" onclick="showTeamDetails(${m.aff_id}, 'round${roundNum}'); return false;" class="team-link team-aff">${m.aff_name}</a> (Aff) ${m.result === 'A' ? '✓' : ''}</div>
-                                <div>vs</div>
-                                <div><a href="#" onclick="showTeamDetails(${m.neg_id}, 'round${roundNum}'); return false;" class="team-link team-neg">${m.neg_name}</a> (Neg) ${m.result === 'N' ? '✓' : ''}</div>
-                            </div>
-                            <div class="match-controls">
-                                <span class="match-id">Match ${m.match_id}</span>
-                                ${!hasResult ? `
-                                    <div class="result-buttons">
-                                        <button class="btn btn-success" onclick="reportResult(${m.match_id}, 'A')">Aff Wins</button>
-                                        <button class="btn btn-success" onclick="reportResult(${m.match_id}, 'N')">Neg Wins</button>
+                            <div class="pairing-sections">
+                                <div class="team-section team-aff-section">
+                                    <div class="team-header">
+                                        <a href="#" onclick="showTeamDetails(${m.aff_id}, 'round${roundNum}'); return false;" class="team-link team-aff">${m.aff_name}</a> 
+                                        <span class="side-label">(Aff)</span>
+                                        ${m.result === 'A' ? '<span class="win-indicator">✓</span>' : ''}
                                     </div>
-                                ` : `
-                                    <div class="result-status">
-                                        Winner: ${m.result === 'A' ? 'Aff' : 'Neg'}
-                                        <div class="correction-buttons">
-                                            <button class="btn btn-sm btn-warning" onclick="correctResult(${m.match_id}, '${m.result}')" title="Switch Winner">⇄</button>
-                                            <button class="btn btn-sm btn-danger" onclick="unsubmitResult(${m.match_id})" title="Unsubmit Result">✕</button>
-                                        </div>
+                                    <div class="members-list">
+                                        ${renderMember(affTeam.members[0], affPoints[0], m.match_id, 'aff_0')}
+                                        ${renderMember(affTeam.members[1], affPoints[1], m.match_id, 'aff_1')}
                                     </div>
-                                `}
+                                </div>
+                                
+                                <div class="team-section team-neg-section">
+                                    <div class="team-header">
+                                        <a href="#" onclick="showTeamDetails(${m.neg_id}, 'round${roundNum}'); return false;" class="team-link team-neg">${m.neg_name}</a>
+                                        <span class="side-label">(Neg)</span>
+                                        ${m.result === 'N' ? '<span class="win-indicator">✓</span>' : ''}
+                                    </div>
+                                    <div class="members-list">
+                                        ${renderMember(negTeam.members[0], negPoints[0], m.match_id, 'neg_0')}
+                                        ${renderMember(negTeam.members[1], negPoints[1], m.match_id, 'neg_1')}
+                                    </div>
+                                </div>
+                                
+                                <div class="match-section">
+                                    <div class="match-header">
+                                        <span class="match-id">Match ${m.match_id}</span>
+                                    </div>
+                                    <div class="match-content">
+                                        ${!hasResult ? `
+                                            <div class="result-buttons">
+                                                <button class="btn btn-success" onclick="reportResult(${m.match_id}, 'A')">Aff Wins</button>
+                                                <button class="btn btn-success" onclick="reportResult(${m.match_id}, 'N')">Neg Wins</button>
+                                            </div>
+                                        ` : `
+                                            <div class="result-status">
+                                                <div class="result-winner">Winner: ${m.result === 'A' ? 'Aff' : 'Neg'}</div>
+                                                <div class="correction-buttons">
+                                                    <button class="btn btn-sm btn-warning" onclick="correctResult(${m.match_id}, '${m.result}')" title="Switch Winner">✏</button>
+                                                    <button class="btn btn-sm btn-danger" onclick="unsubmitResult(${m.match_id})" title="Unsubmit Result">✕</button>
+                                                </div>
+                                            </div>
+                                        `}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     `;
@@ -587,6 +694,29 @@ function showStandings() {
         </table>
     `;
 
+    // Check if we should show participant standings
+    const prelimsComplete = tournament.arePrelimRoundsComplete();
+    let participantStandingsHTML = '';
+
+    if (prelimsComplete) {
+        participantStandingsHTML = `
+            <div class="card" style="margin-top: 2rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h3>Participant Standings</h3>
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <label for="participantMethod" style="margin: 0; font-weight: normal;">Calculation:</label>
+                        <select id="participantMethod" onchange="updateParticipantStandings()" style="width: auto; padding: 0.5rem;">
+                            <option value="total">Total Points</option>
+                            <option value="drop-1">Drop High/Low</option>
+                            <option value="drop-2">Drop 2 High/2 Low</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="participantStandingsTable"></div>
+            </div>
+        `;
+    }
+
     if (showTabs) {
         // Show both preliminary and overall standings with tabs
         tabContent.innerHTML = `
@@ -604,6 +734,7 @@ function showStandings() {
                     ${generateStandingsTable(overallStandings, false)}
                 </div>
             </div>
+            ${participantStandingsHTML}
         `;
     } else {
         // Show only current standings (no tabs)
@@ -612,7 +743,13 @@ function showStandings() {
                 <h3>Current Standings</h3>
                 ${generateStandingsTable(overallStandings, false)}
             </div>
+            ${participantStandingsHTML}
         `;
+    }
+
+    // Initialize participant standings if shown
+    if (prelimsComplete) {
+        updateParticipantStandings();
     }
 }
 
@@ -635,10 +772,147 @@ window.switchStandingsTab = function (tabName) {
     }
 };
 
+// Update participant standings based on selected method
+window.updateParticipantStandings = function () {
+    const method = document.getElementById('participantMethod').value;
+    const participants = tournament.getParticipantStandings(method);
+
+    const tableContainer = document.getElementById('participantStandingsTable');
+
+    if (participants.length === 0) {
+        tableContainer.innerHTML = '<p class="text-muted">No speaker points recorded yet.</p>';
+        return;
+    }
+
+    tableContainer.innerHTML = `
+        <table class="standings-table">
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>Participant</th>
+                    <th>Team</th>
+                    <th>Institution</th>
+                    <th>Total Points</th>
+                    <th>Adjusted Score</th>
+                    <th>Round Scores</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${participants.map((p, index) => `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td><strong>${p.memberName}</strong></td>
+                        <td><a href="#" onclick="showTeamDetails(${p.teamId}, 'standings'); return false;" class="team-link">${p.teamName}</a></td>
+                        <td>${p.institution}</td>
+                        <td>${p.totalPoints.toFixed(1)}</td>
+                        <td><strong>${p.adjustedScore.toFixed(1)}</strong></td>
+                        <td>${p.roundScores.map(s => s.toFixed(1)).join(', ')}</td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+};
+
 // Report Result
 window.reportResult = function (matchId, outcome) {
     try {
         tournament.reportResult(matchId, outcome);
+        updateDashboard();
+    } catch (error) {
+        showNotification('Error', error.message);
+    }
+};
+
+// Show Speaker Point Input for Individual Participant
+window.showSpeakerPointInput = function (matchId, index) {
+    const inputContainer = document.getElementById(`sp_input_${matchId}_${index}_container`);
+    const item = document.getElementById(`sp_item_${matchId}_${index}`);
+
+    // Hide the display elements
+    const displayElements = item.querySelectorAll('.btn, .speaker-point-value, .correction-buttons');
+    displayElements.forEach(el => el.style.display = 'none');
+
+    // Show input container
+    inputContainer.classList.remove('hidden');
+
+    // Focus the input
+    const input = document.getElementById(`sp_input_${matchId}_${index}`);
+    input.focus();
+};
+
+// Submit Speaker Point for Individual Participant
+window.submitSpeakerPoint = function (matchId, index) {
+    try {
+        const input = document.getElementById(`sp_input_${matchId}_${index}`);
+        const value = parseFloat(input.value);
+
+        // If empty or invalid, just cancel the input
+        if (input.value === '' || isNaN(value)) {
+            cancelSpeakerPointInput(matchId, index);
+            return;
+        }
+
+        // Validate range
+        if (value < 0 || value > 30) {
+            showNotification('Invalid Speaker Points', 'Speaker points must be between 0 and 30.');
+            return;
+        }
+
+        // Get current match speaker points
+        const match = tournament.data.matches.find(m => m.match_id === parseInt(matchId));
+        const existingSP = match.speaker_points || { affPoints: [null, null], negPoints: [null, null] };
+
+        // Update the specific participant's points
+        const [side, memberIndex] = index.split('_');
+        if (side === 'aff') {
+            existingSP.affPoints[parseInt(memberIndex)] = value;
+        } else {
+            existingSP.negPoints[parseInt(memberIndex)] = value;
+        }
+
+        // Store updated speaker points
+        tournament.storeSpeakerPoints(parseInt(matchId), existingSP);
+
+        // Refresh UI
+        updateDashboard();
+    } catch (error) {
+        showNotification('Error', error.message);
+    }
+};
+
+// Cancel Speaker Point Input
+window.cancelSpeakerPointInput = function (matchId, index) {
+    const inputContainer = document.getElementById(`sp_input_${matchId}_${index}_container`);
+    const item = document.getElementById(`sp_item_${matchId}_${index}`);
+
+    // Hide input container
+    inputContainer.classList.add('hidden');
+
+    // Show the display elements
+    const displayElements = item.querySelectorAll('.btn, .speaker-point-value, .correction-buttons');
+    displayElements.forEach(el => el.style.display = '');
+};
+
+// Unsubmit Speaker Point for Individual Participant
+window.unsubmitSpeakerPoint = function (matchId, index) {
+    try {
+        // Get current match speaker points
+        const match = tournament.data.matches.find(m => m.match_id === parseInt(matchId));
+        const existingSP = match.speaker_points || { affPoints: [null, null], negPoints: [null, null] };
+
+        // Clear the specific participant's points
+        const [side, memberIndex] = index.split('_');
+        if (side === 'aff') {
+            existingSP.affPoints[parseInt(memberIndex)] = null;
+        } else {
+            existingSP.negPoints[parseInt(memberIndex)] = null;
+        }
+
+        // Store updated speaker points
+        tournament.storeSpeakerPoints(parseInt(matchId), existingSP);
+
+        // Refresh UI
         updateDashboard();
     } catch (error) {
         showNotification('Error', error.message);

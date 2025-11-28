@@ -47,8 +47,18 @@
                     <input type="number" id="numElimRounds" min="0" max="10" value="0" required>
                 </div>
                 <div class="form-group">
-                    <label for="teamNames">Team Names (one per line, optional):</label>
-                    <textarea id="teamNames" rows="8" placeholder="Team 1&#10;Team 2&#10;Team 3&#10;..."></textarea>
+                    <label for="teamData">Team Details (Format: Team Name | Institution | Member 1 | Member 2):</label>
+                    <textarea id="teamData" rows="10"
+                        placeholder="Team A | University X | Alice Smith | Bob Jones&#10;Team B | College Y | Carol White | David Brown&#10;..."></textarea>
+                    <div style="margin-top: 0.5rem; display: flex; gap: 1rem; align-items: center;">
+                        <button type="button" id="autoPopulateBtn" class="btn btn-secondary"
+                            style="width: auto; padding: 0.5rem 1rem;">
+                            Auto-Populate Placeholder Names
+                        </button>
+                        <span style="color: var(--text-muted); font-size: 0.9rem;">
+                            Fills in placeholder names for teams based on number of teams
+                        </span>
+                    </div>
                 </div>
                 <button type="submit" class="btn btn-primary">Initialize Tournament</button>
             </form>
