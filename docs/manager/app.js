@@ -313,21 +313,13 @@ function renderTabs() {
             showRound(roundNum);
             return;
         }
-    } else if (activeTab === 'standings') {
-        showStandings();
-        return;
-    } else if (activeTab && activeTab.startsWith('team')) {
-        const teamId = parseInt(activeTab.replace('team', ''));
-        showTeamDetails(teamId);
+    } else if (activeTab === 'entries') {
+        showEntries();
         return;
     }
 
-    // Default behavior (initial load or invalid state)
-    if (maxPairedRound > 0) {
-        showRound(maxPairedRound);
-    } else {
-        showStandings();
-    }
+    // Default behavior (initial load or invalid state) - show Entries
+    showEntries();
 }
 
 // Handle New Round Button
@@ -417,13 +409,16 @@ function showRound(roundNum) {
         const negPoints = existingSP ? existingSP.negPoints : [null, null];
 
         // Helper function to render member with speaker points
-        const renderMember = (member, points, matchId, index) => {
+        const renderMember = (member, points, matchId, index, teamId) => {
             const hasPoints = points !== null && points !== undefined;
             const inputId = `sp_input_${matchId}_${index}`;
+            const memberName = (member && member.name) ? member.name : member;
 
             return `
                 <div class="member-item" id="sp_item_${matchId}_${index}">
-                    <span class="member-name">${member.name}</span>
+                    <span class="member-name">
+                        <a href="#" onclick="showTeamDetails(${teamId}, 'round${roundNum}'); return false;" class="team-link">${memberName}</a>
+                    </span>
                     ${isPrelimRound ? `
                         ${!hasPoints ? `
                             <button class="btn btn-sm btn-success" onclick="showSpeakerPointInput('${matchId}', '${index}')" title="Add Speaker Points">+</button>
@@ -458,8 +453,8 @@ function showRound(roundNum) {
                                         ${m.result === 'A' ? '<span class="win-indicator">✓</span>' : ''}
                                     </div>
                                     <div class="members-list">
-                                        ${renderMember(affTeam.members[0], affPoints[0], m.match_id, 'aff_0')}
-                                        ${renderMember(affTeam.members[1], affPoints[1], m.match_id, 'aff_1')}
+                                        ${renderMember(affTeam.members[0], affPoints[0], m.match_id, 'aff_0', m.aff_id)}
+                                        ${renderMember(affTeam.members[1], affPoints[1], m.match_id, 'aff_1', m.aff_id)}
                                     </div>
                                 </div>
                                 
@@ -470,8 +465,8 @@ function showRound(roundNum) {
                                         ${m.result === 'N' ? '<span class="win-indicator">✓</span>' : ''}
                                     </div>
                                     <div class="members-list">
-                                        ${renderMember(negTeam.members[0], negPoints[0], m.match_id, 'neg_0')}
-                                        ${renderMember(negTeam.members[1], negPoints[1], m.match_id, 'neg_1')}
+                                        ${renderMember(negTeam.members[0], negPoints[0], m.match_id, 'neg_0', m.neg_id)}
+                                        ${renderMember(negTeam.members[1], negPoints[1], m.match_id, 'neg_1', m.neg_id)}
                                     </div>
                                 </div>
                                 
@@ -606,6 +601,60 @@ function showEntries() {
 
     const teams = tournament.teams;
 
+    // Helper to get member name safely
+    const getMemberName = (member) => {
+        if (typeof member === 'string') return member;
+        if (member && member.name) return member.name;
+        return 'Unknown';
+    };
+
+    // Sorting state
+    if (!window.entriesSort) {
+        window.entriesSort = { column: 'id', direction: 'asc' };
+    }
+
+    // Sort teams
+    const sortedTeams = [...teams].sort((a, b) => {
+        const col = window.entriesSort.column;
+        let valA, valB;
+
+        if (col === 'id') {
+            valA = a.id;
+            valB = b.id;
+        } else if (col === 'name') {
+            valA = a.name.toLowerCase();
+            valB = b.name.toLowerCase();
+        } else if (col === 'institution') {
+            valA = (a.institution || '').toLowerCase();
+            valB = (b.institution || '').toLowerCase();
+        } else if (col === 'member1') {
+            valA = getMemberName(a.members[0]).toLowerCase();
+            valB = getMemberName(b.members[0]).toLowerCase();
+        } else if (col === 'member2') {
+            valA = getMemberName(a.members[1]).toLowerCase();
+            valB = getMemberName(b.members[1]).toLowerCase();
+        }
+
+        if (valA < valB) return window.entriesSort.direction === 'asc' ? -1 : 1;
+        if (valA > valB) return window.entriesSort.direction === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    const getSortIndicator = (col) => {
+        if (window.entriesSort.column !== col) return '↕';
+        return window.entriesSort.direction === 'asc' ? '↑' : '↓';
+    };
+
+    window.sortEntries = (col) => {
+        if (window.entriesSort.column === col) {
+            window.entriesSort.direction = window.entriesSort.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            window.entriesSort.column = col;
+            window.entriesSort.direction = 'asc';
+        }
+        showEntries();
+    };
+
     tabContent.innerHTML = `
         <div class="card">
             <h3>Team Entries List</h3>
@@ -613,15 +662,21 @@ function showEntries() {
             <table class="standings-table">
                 <thead>
                     <tr>
-                        <th>ID</th>
-                        <th>Team Name</th>
+                        <th onclick="sortEntries('id')" style="cursor: pointer;">ID ${getSortIndicator('id')}</th>
+                        <th onclick="sortEntries('name')" style="cursor: pointer;">Team Name ${getSortIndicator('name')}</th>
+                        <th onclick="sortEntries('institution')" style="cursor: pointer;">Institution ${getSortIndicator('institution')}</th>
+                        <th onclick="sortEntries('member1')" style="cursor: pointer;">Member 1 ${getSortIndicator('member1')}</th>
+                        <th onclick="sortEntries('member2')" style="cursor: pointer;">Member 2 ${getSortIndicator('member2')}</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${teams.map(team => `
+                    ${sortedTeams.map(team => `
                         <tr>
                             <td>${team.id}</td>
                             <td><a href="#" onclick="showTeamDetails(${team.id}, 'entries'); return false;" class="team-link"><strong>${team.name}</strong></a></td>
+                            <td>${team.institution || '—'}</td>
+                            <td><a href="#" onclick="showTeamDetails(${team.id}, 'entries'); return false;" class="team-link">${getMemberName(team.members[0])}</a></td>
+                            <td><a href="#" onclick="showTeamDetails(${team.id}, 'entries'); return false;" class="team-link">${getMemberName(team.members[1])}</a></td>
                         </tr>
                     `).join('')}
                 </tbody>
@@ -995,26 +1050,88 @@ window.showTeamDetails = function (teamId, previousView = null) {
     }
 
     // Set label based on previous view
+    // Set label and active tab based on previous view
     if (previousView) {
         if (previousView.startsWith('round')) {
             const roundNum = parseInt(previousView.replace('round', ''));
             backLabel = `← Back to Round ${roundNum}`;
+
+            // Highlight the specific round tab
+            const roundTabBtn = Array.from(tabs).find(btn => btn.textContent === `Round ${roundNum}`);
+            if (roundTabBtn) roundTabBtn.classList.add('active');
+
         } else if (previousView === 'standings') {
             backLabel = '← Back to Standings';
+
+            // Highlight Standings tab
+            const standingsTabBtn = Array.from(tabs).find(btn => btn.textContent === 'Standings');
+            if (standingsTabBtn) standingsTabBtn.classList.add('active');
+
+        } else if (previousView === 'entries') {
+            // Highlight Entries tab
+            const entriesTabBtn = Array.from(tabs).find(btn => btn.textContent === 'Entries');
+            if (entriesTabBtn) entriesTabBtn.classList.add('active');
+
         } else if (previousView.startsWith('team')) {
             const prevTeamId = parseInt(previousView.replace('team', ''));
             const prevTeam = tournament.teams.find(t => t.id === prevTeamId);
             backLabel = prevTeam ? `← Back to ${prevTeam.name}` : '← Back';
+
+            // Keep the same tab active as the previous team view (recursive check needed or default to standings/entries)
+            // For simplicity, if coming from another team, we might not know the original source easily without deeper history analysis.
+            // But usually, we can infer or just leave it blank. 
+            // Better approach: Check the history before the team chain.
+
+            let sourceView = null;
+            for (let i = currentIndex - 1; i >= 0; i--) {
+                const item = navigationHistory[i];
+                if (!item.startsWith('team')) {
+                    sourceView = item;
+                    break;
+                }
+            }
+
+            if (sourceView) {
+                if (sourceView.startsWith('round')) {
+                    const rNum = parseInt(sourceView.replace('round', ''));
+                    const rBtn = Array.from(tabs).find(btn => btn.textContent === `Round ${rNum}`);
+                    if (rBtn) rBtn.classList.add('active');
+                } else if (sourceView === 'standings') {
+                    const sBtn = Array.from(tabs).find(btn => btn.textContent === 'Standings');
+                    if (sBtn) sBtn.classList.add('active');
+                } else if (sourceView === 'entries') {
+                    const eBtn = Array.from(tabs).find(btn => btn.textContent === 'Entries');
+                    if (eBtn) eBtn.classList.add('active');
+                }
+            }
         }
     } else {
         // No previous view found, default to standings
         backLabel = '← Back to Standings';
+        const standingsTabBtn = Array.from(tabs).find(btn => btn.textContent === 'Standings');
+        if (standingsTabBtn) standingsTabBtn.classList.add('active');
     }
+
+    // Helper to get member name safely
+    const getMemberName = (member) => {
+        if (typeof member === 'string') return member;
+        if (member && member.name) return member.name;
+        return 'Unknown';
+    };
+
+    const member1Name = getMemberName(team.members[0]);
+    const member2Name = getMemberName(team.members[1]);
 
     tabContent.innerHTML = `
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-                <h3>Team Details: ${team.name}</h3>
+                <div>
+                    <h3>Team Details: ${team.name}</h3>
+                    <div class="text-muted" style="margin-top: 0.5rem;">
+                        <strong>Members:</strong> ${member1Name} & ${member2Name}
+                        ${team.institution ? `<br><strong>Institution:</strong> ${team.institution}` : ''}
+                    </div>
+                </div>
                 <button class="btn btn-secondary" onclick="${backAction}">${backLabel}</button>
             </div>
 
@@ -1045,6 +1162,8 @@ window.showTeamDetails = function (teamId, previousView = null) {
                         <th>Side</th>
                         <th>Opponent</th>
                         <th>Result</th>
+                        <th>${member1Name} Points</th>
+                        <th>${member2Name} Points</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -1069,12 +1188,20 @@ window.showTeamDetails = function (teamId, previousView = null) {
             roundLabel = getElimRoundLabel(elimRoundNum, num_elim_rounds);
         }
 
+        // Get speaker points for this round
+        const spHistory = team.speaker_points_history.find(h => h.round === match.round_num);
+        const points = spHistory ? spHistory.points : [null, null];
+        const p1Points = points[0] !== null ? points[0].toFixed(1) : '—';
+        const p2Points = points[1] !== null ? points[1].toFixed(1) : '—';
+
         return `
                             <tr>
                                 <td>${roundLabel}</td>
                                 <td>${side}</td>
                                 <td><a href="#" onclick="showTeamDetails(${oppId}); return false;" class="team-link">${oppName}</a></td>
                                 <td class="${resultClass}">${result}</td>
+                                <td>${p1Points}</td>
+                                <td>${p2Points}</td>
                             </tr>
                         `;
     }).join('')}
