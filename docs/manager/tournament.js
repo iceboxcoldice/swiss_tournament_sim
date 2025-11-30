@@ -25,10 +25,20 @@ class Team {
     }
 }
 
+class Judge {
+    constructor(id, name, institution = '') {
+        this.id = id;
+        this.name = name;
+        this.institution = institution || 'Tournament Hire';
+        this.matches_judged = []; // Array of match IDs
+    }
+}
+
 class TournamentManager {
     constructor() {
         this.data = null;
         this.teams = [];
+        this.judges = [];
         this.loadFromStorage();
     }
 
@@ -36,6 +46,7 @@ class TournamentManager {
     // teamDetails: array of {name, institution, members: [{name}, {name}]}
     init(numTeams, numPrelimRounds, numElimRounds, teamDetails = []) {
         this.teams = [];
+        this.judges = [];
         for (let i = 0; i < numTeams; i++) {
             const detail = teamDetails[i] || {};
             const name = detail.name || `Team ${i + 1}`;
@@ -58,6 +69,7 @@ class TournamentManager {
             rounds: Array.from({ length: numPrelimRounds + numElimRounds }, (_, i) => ({ round_num: i + 1 })),
             matches: [],
             next_match_id: 1,
+            next_judge_id: 1,
             pairing_file_content: "# Format: Round MatchID AffID NegID\n",
             result_file_content: "# Format: Round MatchID AffID NegID Outcome\n"
         };
@@ -101,7 +113,8 @@ class TournamentManager {
                 neg_id: neg.id,
                 aff_name: aff.name,
                 neg_name: neg.name,
-                result: null
+                result: null,
+                judge_id: null
             };
             this.data.matches.push(match);
             newMatches.push(match);
@@ -114,6 +127,82 @@ class TournamentManager {
 
         this.saveToStorage();
         return pairs;
+    }
+
+    // Add a new judge
+    addJudge(name, institution = '') {
+        if (!name || name.trim() === '') {
+            throw new Error('Judge name is required');
+        }
+
+        // Check for duplicate names
+        if (this.judges.some(j => j.name.toLowerCase() === name.toLowerCase())) {
+            throw new Error(`Judge with name "${name}" already exists`);
+        }
+
+        const judge = new Judge(this.data.next_judge_id++, name.trim(), institution.trim());
+        this.judges.push(judge);
+        this.saveToStorage();
+        return judge;
+    }
+
+    // Remove a judge
+    removeJudge(judgeId) {
+        const judge = this.judges.find(j => j.id === judgeId);
+        if (!judge) {
+            throw new Error(`Judge ${judgeId} not found`);
+        }
+
+        // Check if judge is assigned to any matches
+        if (judge.matches_judged.length > 0) {
+            throw new Error(`Cannot remove judge "${judge.name}" - they are assigned to ${judge.matches_judged.length} match(es)`);
+        }
+
+        this.judges = this.judges.filter(j => j.id !== judgeId);
+        this.saveToStorage();
+    }
+
+    // Assign a judge to a match
+    assignJudgeToMatch(matchId, judgeId) {
+        const match = this.data.matches.find(m => m.match_id === matchId);
+        if (!match) {
+            throw new Error(`Match ${matchId} not found`);
+        }
+
+        const judge = this.judges.find(j => j.id === judgeId);
+        if (!judge) {
+            throw new Error(`Judge ${judgeId} not found`);
+        }
+
+        // If match already has a judge, unassign them first
+        if (match.judge_id !== null) {
+            this.unassignJudgeFromMatch(matchId);
+        }
+
+        // Assign the new judge
+        match.judge_id = judgeId;
+        if (!judge.matches_judged.includes(matchId)) {
+            judge.matches_judged.push(matchId);
+        }
+
+        this.saveToStorage();
+    }
+
+    // Unassign a judge from a match
+    unassignJudgeFromMatch(matchId) {
+        const match = this.data.matches.find(m => m.match_id === matchId);
+        if (!match) {
+            throw new Error(`Match ${matchId} not found`);
+        }
+
+        if (match.judge_id !== null) {
+            const judge = this.judges.find(j => j.id === match.judge_id);
+            if (judge) {
+                judge.matches_judged = judge.matches_judged.filter(mid => mid !== matchId);
+            }
+            match.judge_id = null;
+            this.saveToStorage();
+        }
     }
 
     // Swiss pairing algorithm – mirrors the Python `pair_round` logic
@@ -784,6 +873,12 @@ class TournamentManager {
                 side_history: t.side_history,
                 break_seed: t.break_seed,
                 speaker_points_history: t.speaker_points_history
+            })),
+            judges: this.judges.map(j => ({
+                id: j.id,
+                name: j.name,
+                institution: j.institution,
+                matches_judged: j.matches_judged
             }))
         };
     }
@@ -795,6 +890,7 @@ class TournamentManager {
         // Migration: Generate if missing
         if (!this.data.pairing_file_content) this.data.pairing_file_content = this.generatePairingFileContent();
         if (!this.data.result_file_content) this.data.result_file_content = this.generateResultFileContent();
+        if (!this.data.next_judge_id) this.data.next_judge_id = 1;
 
         // Validate redundancy
         this.validatePairingRedundancy(this.data.matches, this.data.pairing_file_content);
@@ -820,6 +916,14 @@ class TournamentManager {
             team.speaker_points_history = t.speaker_points_history || [];
             return team;
         });
+
+        // Import judges (migration: handle old tournaments without judges)
+        this.judges = (data.judges || []).map(j => {
+            const judge = new Judge(j.id, j.name, j.institution);
+            judge.matches_judged = j.matches_judged || [];
+            return judge;
+        });
+
         this.saveToStorage();
     }
 
