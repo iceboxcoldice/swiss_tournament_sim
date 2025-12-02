@@ -27,8 +27,15 @@ TOURNAMENT_FILE = "tournament.json"
 # Global threading lock for safe concurrent writes
 _tournament_lock = threading.Lock()
 
+# Allow overriding load/save for GCS support
+load_tournament_impl = None
+save_tournament_impl = None
+
 def load_tournament_data() -> Tuple[Dict, List[Team]]:
     """Loads tournament data and reconstructs Team objects."""
+    if load_tournament_impl:
+        return load_tournament_impl()
+        
     if not os.path.exists(TOURNAMENT_FILE):
         print(f"Error: {TOURNAMENT_FILE} not found. Run 'init' first.")
         sys.exit(1)
@@ -36,6 +43,9 @@ def load_tournament_data() -> Tuple[Dict, List[Team]]:
     with open(TOURNAMENT_FILE, 'r') as f:
         data = json.load(f)
     
+    return _reconstruct_teams(data)
+
+def _reconstruct_teams(data):
     # Reconstruct Team objects
     teams = []
     for t_data in data['teams']:
@@ -52,11 +62,9 @@ def load_tournament_data() -> Tuple[Dict, List[Team]]:
         t.history = t_data['history']
         t.opponent_history = t_data['opponent_history']
         t.break_seed = t_data.get('break_seed')
-        # Reconstruct opponents set from opponent_history (ignoring -1/byes if needed, or just keeping track)
-        # Actually, swiss_sim uses opponent_history now, so we just need to load that.
-        # But wait, swiss_sim might still use .opponents in some places? 
-        # No, we refactored it to use opponent_history.
-        # However, let's double check if we need to populate anything else.
+        t.members = t_data.get('members', [])
+        t.institution = t_data.get('institution')
+        t.speaker_points_history = t_data.get('speaker_points_history', [])
         teams.append(t)
         
     return data, teams
@@ -66,6 +74,9 @@ def load_tournament() -> Tuple[Dict, List[Team]]:
     return load_tournament_data()
 
 def save_tournament(data, teams):
+    if save_tournament_impl:
+        return save_tournament_impl(data, teams)
+        
     # Update teams data
     data['teams'] = [asdict(t) for t in teams]
     # Write under lock
@@ -88,6 +99,7 @@ def recalculate_stats(data, teams, team_map, max_round=None):
         t.side_history = {}
         t.history = []
         t.opponent_history = []
+        t.speaker_points_history = [] # Reset and rebuild from matches
 
     # Re-process all matches
     # Use sorted() to avoid modifying the original list order in data
@@ -96,6 +108,22 @@ def recalculate_stats(data, teams, team_map, max_round=None):
     for match in matches:
         if max_round is not None and match['round_num'] > max_round:
             continue
+            
+        # Rebuild speaker points history regardless of result
+        if 'speaker_points' in match and match['speaker_points']:
+            sp = match['speaker_points']
+            aff = team_map[match['aff_id']]
+            neg = team_map[match['neg_id']]
+            
+            aff.speaker_points_history.append({
+                'round': match['round_num'],
+                'points': sp['affPoints']
+            })
+            neg.speaker_points_history.append({
+                'round': match['round_num'],
+                'points': sp['negPoints']
+            })
+
         if match['result']:
             aff = team_map[match['aff_id']]
             neg = team_map[match['neg_id']]
@@ -329,30 +357,86 @@ def cmd_init(args):
         sys.exit(1)
 
     teams = []
-    if args.names:
-        with open(args.names, 'r') as f:
-            names = [line.strip() for line in f if line.strip()]
+    if args.teams_file:
+        with open(args.teams_file, 'r') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                
+                # Format: TeamID, Team Name, Institution, Member1, Member2, ...
+                parts = [p.strip() for p in line.split(',')]
+                if len(parts) < 2:
+                    print(f"Warning: Invalid team entry on line {line_num}: {line}")
+                    continue
+                
+                try:
+                    team_id = int(parts[0])
+                    name = parts[1]
+                    institution = parts[2] if len(parts) > 2 else None
+                    members = parts[3:] if len(parts) > 3 else []
+                    
+                    team = Team(id=team_id, true_rank=0, name=name, members=members)
+                    if institution:
+                        team.institution = institution
+                    teams.append(team)
+                except ValueError:
+                    print(f"Warning: Invalid team ID on line {line_num}: {line}")
+                    continue
         
-        if len(names) != args.teams:
-            print(f"Warning: Number of names ({len(names)}) does not match number of teams ({args.teams}).")
-            # We'll truncate or pad
-            
-        for i in range(args.teams):
-            name = names[i] if i < len(names) else f"Team {i+1}"
-            teams.append(Team(id=i, true_rank=0, name=name))
+        # Sort by ID to ensure correct order
+        teams.sort(key=lambda t: t.id)
+        
+        # Verify we have the expected number of teams
+        if len(teams) != args.num_teams:
+            print(f"Warning: Found {len(teams)} teams in file, expected {args.num_teams}")
+        
+        print(f"Loaded {len(teams)} teams from {args.teams_file}")
     else:
-        for i in range(args.teams):
+        for i in range(args.num_teams):
             teams.append(Team(id=i, true_rank=0, name=f"Team {i+1}"))
+
+    # Load judges if judges file provided
+    judges = []
+    if args.judges:
+        with open(args.judges, 'r') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                
+                # Format: JudgeID, Name, Institution
+                parts = [p.strip() for p in line.split(',')]
+                if len(parts) < 2:
+                    print(f"Warning: Invalid judge entry on line {line_num}: {line}")
+                    continue
+                
+                try:
+                    judge_id = int(parts[0])
+                    name = parts[1]
+                    institution = parts[2] if len(parts) > 2 else "Unknown"
+                    
+                    judges.append({
+                        'id': judge_id,
+                        'name': name,
+                        'institution': institution
+                    })
+                except ValueError:
+                    print(f"Warning: Invalid judge ID on line {line_num}: {line}")
+                    continue
+        
+        print(f"Loaded {len(judges)} judges from {args.judges}")
 
     data = {
         "config": {
-            "num_teams": args.teams,
+            "num_teams": args.num_teams,
             "num_rounds": args.rounds,
             "num_elim_rounds": args.elim_rounds,
         },
         "current_round": 0,
         "rounds": [],  # List of round data (match_ids)
         "teams": [asdict(t) for t in teams], # Initial team data
+        "judges": judges,  # List of judge data
         "matches": [], # Global list of all matches
         "next_match_id": 1 # Counter for unique match IDs
     }
@@ -362,52 +446,52 @@ def cmd_init(args):
     try:
         with open(TOURNAMENT_FILE, 'w') as f:
             json.dump(data, f, indent=2)
-        print(f"Initialized tournament with {args.teams} teams and {args.rounds} rounds.")
+        print(f"Initialized tournament with {args.num_teams} teams and {args.rounds} rounds.")
     finally:
         _tournament_lock.release()
 
-def cmd_pair(args):
-    data, teams = load_tournament()
-    
-    round_num = args.round
-    
+def pair_round_logic(data, teams, round_num):
+    """Core logic for pairing a round. Returns list of matches."""
     # Check if this round already exists
     if round_num <= len(data['rounds']):
-        print(f"Error: Round {round_num} already paired. Re-pairing is not supported.")
-        sys.exit(1)
+        raise ValueError(f"Round {round_num} already paired. Re-pairing is not supported.")
         
     # Validation: must be the next sequential round
     expected_round = len(data['rounds']) + 1
     if round_num != expected_round:
-        print(f"Error: Expected to pair Round {expected_round}, but got {round_num}.")
-        sys.exit(1)
+        raise ValueError(f"Expected to pair Round {expected_round}, but got {round_num}.")
     
-    # Check that all matches from the most recent existing round have results (unless we're re-pairing it)
-    # Special case: Round 2 doesn't need to wait for Round 1 results
+    # Check that all matches from the most recent existing round have results
     if len(data['rounds']) > 0 and round_num > 2:
         last_round_matches = [m for m in data['matches'] if m['round_num'] == len(data['rounds'])]
         unreported = [m for m in last_round_matches if m['result'] is None]
         if unreported:
-            print(f"Error: Cannot pair Round {round_num} until all results from Round {len(data['rounds'])} are reported.")
-            print(f"\nUnreported matches from Round {len(data['rounds'])}:")
-            for m in unreported:
-                print(f"  Match {m['match_id']}: {m['aff_name']} (ID: {m['aff_id']}) vs {m['neg_name']} (ID: {m['neg_id']})")
-            sys.exit(1)
-    
-    print(f"Generating pairings for Round {round_num}...")
+            msg = f"Cannot pair Round {round_num} until all results from Round {len(data['rounds'])} are reported."
+            # We could include details about unreported matches in the exception if needed
+            raise ValueError(msg)
     
     # Generate pairings
-    # Note: pair_round expects 0-indexed round_num
     num_prelim_rounds = data['config']['num_rounds']
     
     if round_num <= num_prelim_rounds:
         pairs = pair_round(teams, round_num - 1, use_buchholz=True)
     else:
         # Elimination round
-        print(f"Elimination Round {round_num - num_prelim_rounds}")
         pairs = generate_elim_pairings(data, teams, round_num)
+        
+    return pairs
+
+def cmd_pair(args):
+    data, teams = load_tournament()
+    round_num = args.round
     
-    # Display pairings
+    try:
+        pairs = pair_round_logic(data, teams, round_num)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+    
+    print(f"Generating pairings for Round {round_num}...")
     print(f"\n--- Pairings for Round {round_num} ---")
     
     next_match_id = data.get('next_match_id', 1)
@@ -433,7 +517,8 @@ def cmd_pair(args):
             "neg_id": neg.id,
             "aff_name": aff.name,
             "neg_name": neg.name,
-            "result": None
+            "result": None,
+            "judge_id": None
         }
         existing_matches.append(match)
         round_match_ids.append(match_id)
@@ -447,7 +532,7 @@ def cmd_pair(args):
     save_tournament(data, teams) # Lock released in save_tournament
     print(f"\nPairings saved. Use 'report {round_num}' to enter results.")
 
-def _process_match_result(round_id, match_id, aff_id, neg_id, outcome, matches, force) -> Tuple[bool, str, str]:
+def _process_match_result(round_id, match_id, aff_id, neg_id, outcome, matches, force, judge_id=None, speaker_points=None) -> Tuple[bool, str, str]:
     """
     Validates and records a single match result.
     Returns (Success, ErrorCode, ErrorMessage).
@@ -464,6 +549,10 @@ def _process_match_result(round_id, match_id, aff_id, neg_id, outcome, matches, 
         # Allow idempotent updates: if result already matches, treat as success
         winner = outcome.upper()
         if match['result'] == winner:
+            if judge_id is not None:
+                match['judge_id'] = judge_id
+            if speaker_points is not None:
+                match['speaker_points'] = speaker_points
             return True, 'OK', "Result already matches (idempotent)"
         return False, 'ROUND_MISMATCH', f"Round mismatch: Match {match_id} is in Round {match['round_num']}, expected {round_id}"
 
@@ -479,11 +568,19 @@ def _process_match_result(round_id, match_id, aff_id, neg_id, outcome, matches, 
     winner = outcome.upper()
     if match['result'] is not None:
         if match['result'] == winner:
+            if judge_id is not None:
+                match['judge_id'] = judge_id
+            if speaker_points is not None:
+                match['speaker_points'] = speaker_points
             return True, 'OK', "Result already matches (idempotent)"
         if not force:
             return False, 'OUTCOME_CONFLICT', f"Outcome conflict: existing={match['result']}, new={winner}"
             
     match['result'] = winner
+    if judge_id is not None:
+        match['judge_id'] = judge_id
+    if speaker_points is not None:
+        match['speaker_points'] = speaker_points
     return True, 'OK', ""
 
 def _handle_single_match_report(args, matches) -> bool:
@@ -493,9 +590,12 @@ def _handle_single_match_report(args, matches) -> bool:
         print(f"Error: Invalid round number '{args.round}'")
         return False
         
+    # Parse speaker points if provided via args (not implemented in CLI args yet, but placeholder)
+    speaker_points = None
+        
     success, _, error_msg = _process_match_result(
         round_num, args.match_id, args.aff_id, args.neg_id, args.outcome, 
-        matches, args.force
+        matches, args.force, getattr(args, 'judge_id', None), speaker_points
     )
     
     if not success:
@@ -535,8 +635,8 @@ def _parse_results_file(filename, matches, force=False):
                 stripped = stripped.split('#')[0].strip()
                 
             parts = stripped.split()
-            if len(parts) < 5:
-                msg = "Insufficient fields (need Round MatchID AffID NegID Outcome)"
+            if len(parts) < 6:
+                msg = "Insufficient fields (need Round MatchID AffID NegID Outcome JudgeID [Aff1 Aff2 Neg1 Neg2])"
                 errors_by_type['INVALID_FORMAT'].append((line_num, stripped, msg))
                 all_errors.append((line_num, stripped, msg))
                 continue
@@ -547,11 +647,44 @@ def _parse_results_file(filename, matches, force=False):
                 aff_id = int(parts[2])
                 neg_id = int(parts[3])
                 outcome = parts[4].upper()
+                judge_id = int(parts[5])
+                
+                # Treat -1 as "no judge"
+                if judge_id == -1:
+                    judge_id = None
+                
+                speaker_points = None
+                
+                # Check for speaker points (4 additional columns)
+                if len(parts) >= 10:
+                    try:
+                        sps = []
+                        for x in parts[6:10]:
+                            if x.lower() == 'null':
+                                sps.append(None)
+                            else:
+                                sps.append(float(x))
+                                
+                        speaker_points = {
+                            'affPoints': [sps[0], sps[1]],
+                            'negPoints': [sps[2], sps[3]]
+                        }
+                    except ValueError:
+                        msg = "Invalid speaker points format (must be 4 numeric values or 'null')"
+                        errors_by_type['INVALID_FORMAT'].append((line_num, stripped, msg))
+                        all_errors.append((line_num, stripped, msg))
+                        continue
+                elif len(parts) > 6:
+                    # Extra columns but not enough for speaker points
+                    msg = f"Invalid format: expected 6 or 10 columns, got {len(parts)}"
+                    errors_by_type['INVALID_FORMAT'].append((line_num, stripped, msg))
+                    all_errors.append((line_num, stripped, msg))
+                    continue
                 
                 # Process result
                 success, code, error_msg = _process_match_result(
                     r_num, m_id, aff_id, neg_id, outcome, 
-                    matches, force
+                    matches, force, judge_id=judge_id, speaker_points=speaker_points
                 )
                 
                 if success:
@@ -769,6 +902,10 @@ def cmd_export(args):
     data, teams = load_tournament()
     
     matches = data.get('matches', [])
+    judges = data.get('judges', [])
+    
+    # Create judge lookup map
+    judge_map = {j['id']: j for j in judges}
     
     if not matches:
         print("No matches to export.")
@@ -785,7 +922,8 @@ def cmd_export(args):
     # Always create results file (even if no results yet) to serve as template
     with open(output_file, 'w') as f:
         f.write("# Exported results from tournament\n")
-        f.write("# Format: Round MatchID AffID NegID Outcome\n")
+        f.write("# Format: Round MatchID AffID NegID Outcome JudgeID [Aff1 Aff2 Neg1 Neg2]\n")
+        f.write("# JudgeID: Use -1 if no judge assigned\n")
         f.write("# Outcome: A (Aff wins) or N (Neg wins)\n")
         f.write("# Uncomment and edit lines below to report results\n\n")
         
@@ -799,10 +937,30 @@ def cmd_export(args):
             
             if m['result']:
                 # Already reported - write as active line
-                f.write(f"{m['round_num']} {m['match_id']} {m['aff_id']} {m['neg_id']} {m['result']}\n")
+                # Always include judge_id (-1 if none)
+                judge_id = m.get('judge_id') if m.get('judge_id') is not None else -1
+                line = f"{m['round_num']} {m['match_id']} {m['aff_id']} {m['neg_id']} {m['result']} {judge_id}"
+                
+                if m.get('speaker_points'):
+                    sp = m['speaker_points']
+                    # Format: Aff1 Aff2 Neg1 Neg2
+                    a1 = sp['affPoints'][0] if sp['affPoints'][0] is not None else "null"
+                    a2 = sp['affPoints'][1] if sp['affPoints'][1] is not None else "null"
+                    n1 = sp['negPoints'][0] if sp['negPoints'][0] is not None else "null"
+                    n2 = sp['negPoints'][1] if sp['negPoints'][1] is not None else "null"
+                    line += f" {a1} {a2} {n1} {n2}"
+                
+                # Add comment with team names and judge name
+                comment = f"  # {m['aff_name']} vs {m['neg_name']}"
+                if judge_id != -1 and judge_id in judge_map:
+                    judge = judge_map[judge_id]
+                    comment += f" | Judge: {judge['name']}"
+                line += comment
+                    
+                f.write(line + "\n")
             else:
                 # Not reported - write as commented template
-                f.write(f"# {m['round_num']} {m['match_id']} {m['aff_id']} {m['neg_id']} A_or_N  # {m['aff_name']} vs {m['neg_name']}\n")
+                f.write(f"# {m['round_num']} {m['match_id']} {m['aff_id']} {m['neg_id']} A_or_N -1  # {m['aff_name']} vs {m['neg_name']}\n")
     
     if reported_matches:
         print(f"Exported {len(reported_matches)} results to {output_file}")
@@ -902,7 +1060,8 @@ def cmd_reinit(args):
                 'round_num': round_num,
                 'aff_id': aff_id,
                 'neg_id': neg_id,
-                'result': None
+                'result': None,
+                'judge_id': None
             })
     
     if not matches:
@@ -1037,10 +1196,11 @@ def main():
     
     # Init
     parser_init = subparsers.add_parser("init", help="Initialize tournament")
-    parser_init.add_argument('teams', type=int, help='Number of teams')
+    parser_init.add_argument('num_teams', type=int, help='Number of teams')
     parser_init.add_argument('rounds', type=int, help='Number of preliminary rounds')
     parser_init.add_argument('--elim-rounds', type=int, default=0, help='Number of elimination rounds (default: 0)')
-    parser_init.add_argument('--names', type=str, help='File containing team names (one per line)')
+    parser_init.add_argument('--teams', dest='teams_file', type=str, help='File containing team info (format: TeamID, Name, Institution, Member1, Member2, ...)')
+    parser_init.add_argument('--judges', type=str, help='File containing judge info (format: JudgeID, Name, Institution)')
     parser_init.add_argument('--force', action='store_true', help='Overwrite existing tournament')
     
     # Pair
@@ -1054,6 +1214,7 @@ def main():
     parser_report.add_argument("aff_id", type=int, nargs='?', help="Affirmative team ID (optional)")
     parser_report.add_argument("neg_id", type=int, nargs='?', help="Negative team ID (optional)")
     parser_report.add_argument("outcome", type=str, nargs='?', help="Outcome (A/N) (optional)")
+    parser_report.add_argument("--judge-id", type=int, help="Judge ID (optional)")
     parser_report.add_argument("--file", type=str, help="File with results (format: Round MatchID AffID NegID Outcome)")
     parser_report.add_argument("--force", action="store_true", help="Overwrite existing results")
     

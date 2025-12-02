@@ -39,12 +39,110 @@ class TournamentManager {
         this.data = null;
         this.teams = [];
         this.judges = [];
+        this.backendUrl = null;
         this.loadFromStorage();
+    }
+
+    setBackendUrl(url) {
+        this.backendUrl = url;
+    }
+
+    async loadFromStorage() {
+        // Try to load backend URL first
+        const savedUrl = localStorage.getItem('backendUrl');
+        if (savedUrl) {
+            this.backendUrl = savedUrl;
+        }
+
+        if (this.backendUrl) {
+            // Cloud Mode
+            try {
+                const response = await fetch(`${this.backendUrl}/api/data`);
+                if (response.ok) {
+                    const data = await response.json();
+                    this.data = data;
+                    this.reconstructObjects();
+                    return;
+                }
+            } catch (e) {
+                console.error("Failed to load from cloud:", e);
+                // Fallback to local? Or just show error?
+                // For now, let's fallback to local but keep URL set
+            }
+        }
+
+        // Local Mode
+        const storedData = localStorage.getItem('tournamentData');
+        if (storedData) {
+            this.data = JSON.parse(storedData);
+            this.reconstructObjects();
+        }
+    }
+
+    async saveToStorage() {
+        if (!this.data) return;
+
+        // Always save local backup
+        localStorage.setItem('tournamentData', JSON.stringify(this.data));
+
+        // If Cloud Mode, sync to backend
+        // Note: This is tricky because backend expects specific API calls (init, pair, report)
+        // rather than a full state dump.
+        // Ideally, we should refactor frontend to call API endpoints instead of manipulating state directly.
+        // But for this migration, we might need a "sync" endpoint or just rely on the specific actions.
+
+        // However, since we are modifying the actions (init, pair, report) to call API,
+        // we might not need a generic saveToStorage for cloud.
+    }
+
+    reconstructObjects() {
+        if (!this.data) return;
+
+        this.teams = this.data.teams.map(t => {
+            const team = new Team(t.id, t.name, t.institution, t.members);
+            Object.assign(team, t);
+            return team;
+        });
+
+        // Reconstruct judges if present
+        if (this.data.judges) {
+            this.judges = this.data.judges.map(j => new Judge(j.id, j.name, j.institution));
+        }
     }
 
     // Initialize new tournament
     // teamDetails: array of {name, institution, members: [{name}, {name}]}
-    init(numTeams, numPrelimRounds, numElimRounds, teamDetails = []) {
+    async init(numTeams, numPrelimRounds, numElimRounds, teamDetails = []) {
+        if (this.backendUrl) {
+            // Cloud Mode
+            try {
+                const response = await fetch(`${this.backendUrl}/api/init`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        num_teams: numTeams,
+                        rounds: numPrelimRounds,
+                        elim_rounds: numElimRounds,
+                        teams: teamDetails // We might need to update backend to accept team details
+                    })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    // Reload full data to get initialized state
+                    await this.loadFromStorage();
+                    return true;
+                } else {
+                    throw new Error('Backend init failed');
+                }
+            } catch (e) {
+                console.error("Cloud init failed:", e);
+                alert("Failed to initialize tournament on cloud: " + e.message);
+                return false;
+            }
+        }
+
+        // Local Mode
         this.teams = [];
         this.judges = [];
         for (let i = 0; i < numTeams; i++) {
@@ -71,7 +169,7 @@ class TournamentManager {
             next_match_id: 1,
             next_judge_id: 1,
             pairing_file_content: "# Format: Round MatchID AffID NegID\n",
-            result_file_content: "# Format: Round MatchID AffID NegID Outcome\n"
+            result_file_content: "# Format: Round MatchID AffID NegID Outcome JudgeID [Aff1Pts Aff2Pts Neg1Pts Neg2Pts]\n# JudgeID: Use -1 if no judge assigned\n"
         };
 
         this.saveToStorage();
@@ -79,7 +177,32 @@ class TournamentManager {
     }
 
     // Generate pairings for a round using Swiss system
-    pairRound(roundNum) {
+    async pairRound(roundNum) {
+        if (this.backendUrl) {
+            // Cloud Mode
+            try {
+                const response = await fetch(`${this.backendUrl}/api/pair`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ round: roundNum })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    await this.loadFromStorage();
+                    return result.matches;
+                } else {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Backend pairing failed');
+                }
+            } catch (e) {
+                console.error("Cloud pairing failed:", e);
+                alert("Failed to pair round on cloud: " + e.message);
+                throw e;
+            }
+        }
+
+        // Local Mode
         // Check if previous round is complete (except Round 2)
         if (roundNum > 2) {
             for (let r = 1; r < roundNum; r++) {
@@ -524,8 +647,37 @@ class TournamentManager {
         }
     }
 
-    // Report match result
-    reportResult(matchId, outcome) {
+    // Report result for a match
+    // speakerPoints: {affPoints: [p1, p2], negPoints: [p3, p4]} (optional)
+    async reportResult(matchId, outcome, speakerPoints = null) {
+        if (this.backendUrl) {
+            // Cloud Mode
+            try {
+                const response = await fetch(`${this.backendUrl}/api/report`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        match_id: matchId,
+                        result: outcome,
+                        speaker_points: speakerPoints
+                    })
+                });
+
+                if (response.ok) {
+                    await this.loadFromStorage(); // Reload data from backend after successful report
+                    return true;
+                } else {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Backend report failed');
+                }
+            } catch (e) {
+                console.error("Cloud report failed:", e);
+                alert("Failed to report result on cloud: " + e.message);
+                return false;
+            }
+        }
+
+        // Local Mode
         const match = this.data.matches.find(m => m.match_id === matchId);
         if (!match) {
             throw new Error(`Match ${matchId} not found`);
@@ -541,15 +693,44 @@ class TournamentManager {
 
         match.result = outcome;
 
-        // Update result file content
-        this.data.result_file_content += `${match.round_num} ${match.match_id} ${match.aff_id} ${match.neg_id} ${outcome}\n`;
+        // Build result line with judge_id (always included, -1 if none)
+        const judgeId = (match.judge_id !== null && match.judge_id !== undefined) ? match.judge_id : -1;
+
+        let spString = "";
+        // Use provided points or existing points in match
+        const pointsToLog = speakerPoints || match.speaker_points;
+
+        if (pointsToLog) {
+            // If new points provided, store them
+            if (speakerPoints) {
+                this.storeSpeakerPoints(matchId, speakerPoints);
+            }
+
+            // Format for file: Aff1 Aff2 Neg1 Neg2
+            const a1 = pointsToLog.affPoints[0] !== null ? pointsToLog.affPoints[0] : "null";
+            const a2 = pointsToLog.affPoints[1] !== null ? pointsToLog.affPoints[1] : "null";
+            const n1 = pointsToLog.negPoints[0] !== null ? pointsToLog.negPoints[0] : "null";
+            const n2 = pointsToLog.negPoints[1] !== null ? pointsToLog.negPoints[1] : "null";
+            spString = ` ${a1} ${a2} ${n1} ${n2}`;
+        }
+
+        // Update result file content: Round MatchID AffID NegID Outcome JudgeID [SP1 SP2 SP3 SP4]
+        this.data.result_file_content += `${match.round_num} ${match.match_id} ${match.aff_id} ${match.neg_id} ${outcome} ${judgeId}${spString}\n`;
 
         this.recalculateStats();
         this.saveToStorage();
+        return true;
     }
 
     // Update match result (allows overwrite)
-    updateResult(matchId, newOutcome) {
+    async updateResult(matchId, newOutcome, speakerPoints = null) {
+        if (this.backendUrl) {
+            // Cloud Mode - Reuse report endpoint as it handles updates
+            // The backend report endpoint should handle updating existing results
+            return this.reportResult(matchId, newOutcome, speakerPoints);
+        }
+
+        // Local Mode
         const match = this.data.matches.find(m => m.match_id === matchId);
         if (!match) {
             throw new Error(`Match ${matchId} not found`);
@@ -581,12 +762,33 @@ class TournamentManager {
 
         // Append new result if exists
         if (newOutcome !== null) {
+            const judgeId = (match.judge_id !== null && match.judge_id !== undefined) ? match.judge_id : -1;
+
+            let spString = "";
+            // Use provided points or existing points in match
+            const pointsToLog = speakerPoints || match.speaker_points;
+
+            if (pointsToLog) {
+                // If new points provided, store them
+                if (speakerPoints) {
+                    this.storeSpeakerPoints(matchId, speakerPoints);
+                }
+
+                const sp = pointsToLog;
+                const a1 = sp.affPoints[0] !== null ? sp.affPoints[0] : "null";
+                const a2 = sp.affPoints[1] !== null ? sp.affPoints[1] : "null";
+                const n1 = sp.negPoints[0] !== null ? sp.negPoints[0] : "null";
+                const n2 = sp.negPoints[1] !== null ? sp.negPoints[1] : "null";
+                spString = ` ${a1} ${a2} ${n1} ${n2}`;
+            }
+
             if (!this.data.result_file_content.endsWith('\n')) this.data.result_file_content += '\n';
-            this.data.result_file_content += `${match.round_num} ${match.match_id} ${match.aff_id} ${match.neg_id} ${newOutcome}\n`;
+            this.data.result_file_content += `${match.round_num} ${match.match_id} ${match.aff_id} ${match.neg_id} ${newOutcome} ${judgeId}${spString}\n`;
         }
 
         this.recalculateStats();
         this.saveToStorage();
+        return true;
     }
 
     // Recalculate all team statistics
@@ -771,7 +973,12 @@ class TournamentManager {
             points: speakerPoints.negPoints
         });
 
-        this.saveToStorage();
+        // If match already has a result, update the result file to include new points
+        if (match.result !== null) {
+            this.updateResult(matchId, match.result);
+        } else {
+            this.saveToStorage();
+        }
     }
 
     // Get participant standings

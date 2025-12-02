@@ -27,6 +27,9 @@
                 <button id="exportBtn" class="btn btn-secondary">📥 Export</button>
                 <button id="importBtn" class="btn btn-secondary">📤 Import</button>
                 <input type="file" id="importFile" accept=".json" style="display: none;">
+                <button id="backendConfigBtn" class="btn btn-secondary">☁ Cloud</button>
+                <span id="connectionStatus" class="text-gray-500 text-sm font-medium" style="margin-left: 0.5rem;">Local
+                    Mode</span>
             </div>
         </header>
 
@@ -105,6 +108,22 @@
             <p id="notificationMessage"></p>
             <div class="modal-actions">
                 <button id="notificationOkBtn" class="btn btn-primary">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Backend Config Modal -->
+    <div id="backendConfigModal" class="modal hidden">
+        <div class="modal-content">
+            <h3>Cloud Backend Configuration</h3>
+            <p>Connect to a Google App Engine backend to enable cloud storage and multi-user access.</p>
+            <div class="form-group">
+                <label for="backendUrlInput">Backend URL:</label>
+                <input type="text" id="backendUrlInput" placeholder="https://your-project-id.appspot.com">
+            </div>
+            <div class="modal-actions">
+                <button id="closeBackendBtn" class="btn btn-secondary">Cancel</button>
+                <button id="saveBackendBtn" class="btn btn-primary">Connect</button>
             </div>
         </div>
     </div>
