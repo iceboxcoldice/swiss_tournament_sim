@@ -1462,10 +1462,11 @@ window.submitSpeakerPoint = function (matchId, index) {
         if (form) {
             form.classList.add('hidden');
             // Clear form
+            // Clear form fields
             document.getElementById('judgeName').value = '';
             document.getElementById('judgeInstitution').value = '';
         }
-    }
+    };
 
     function submitAddJudge(event) {
         event.preventDefault();
@@ -1475,6 +1476,7 @@ window.submitSpeakerPoint = function (matchId, index) {
 
         try {
             tournament.addJudge(name, institution);
+            hideAddJudgeForm(); // Hide form after successful add
             showJudges(); // Refresh the view
             showNotification('Success', `Judge "${name}" added successfully!`);
         } catch (error) {
