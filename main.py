@@ -200,6 +200,10 @@ def pair_round():
             return jsonify({"message": f"Paired Round {round_num}", "matches": new_matches}), 200
         else:
             return jsonify({"error": "Failed to save pairings"}), 500
+            
+    except Exception as e:
+        logger.error(f"Error in pair: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/report', methods=['POST'])
 def report_result():
