@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+from dataclasses import asdict
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from google.cloud import storage
@@ -79,7 +80,7 @@ tm.load_tournament_impl = patched_load_tournament
 
 def patched_save_tournament(data, teams):
     # Update teams data
-    data['teams'] = [swiss_sim.asdict(t) for t in teams]
+    data['teams'] = [asdict(t) for t in teams]
     return save_tournament_to_gcs(data)
 
 tm.save_tournament_impl = patched_save_tournament
@@ -114,7 +115,7 @@ def init_tournament():
             },
             "current_round": 0,
             "rounds": [],
-            "teams": [swiss_sim.asdict(t) for t in teams],
+            "teams": [asdict(t) for t in teams],
             "matches": [],
             "next_match_id": 1
         }
