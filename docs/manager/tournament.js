@@ -129,11 +129,23 @@ class TournamentManager {
 
                 if (response.ok) {
                     const result = await response.json();
-                    // Reload full data to get initialized state
-                    await this.loadFromStorage();
-                    return true;
+                    console.log('Backend init successful:', result);
+
+                    // Reload full data from backend
+                    const dataResponse = await fetch(`${this.backendUrl}/api/data`);
+                    if (dataResponse.ok) {
+                        const data = await dataResponse.json();
+                        this.data = data;
+                        this.reconstructObjects();
+                        console.log('Data loaded from backend after init');
+                        return true;
+                    } else {
+                        console.error('Failed to load data after init');
+                        return false;
+                    }
                 } else {
-                    throw new Error('Backend init failed');
+                    const error = await response.json();
+                    throw new Error(error.error || 'Backend init failed');
                 }
             } catch (e) {
                 console.error("Cloud init failed:", e);
