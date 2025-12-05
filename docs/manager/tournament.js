@@ -57,7 +57,7 @@ class TournamentManager {
         if (this.backendUrl) {
             // Cloud Mode
             try {
-                const response = await fetch(`${this.backendUrl}/api/data`);
+                const response = await fetch(`${this.backendUrl}/api/data`, { cache: 'no-store' });
                 if (response.ok) {
                     const data = await response.json();
                     this.data = data;
@@ -132,12 +132,13 @@ class TournamentManager {
                     console.log('Backend init successful:', result);
 
                     // Reload full data from backend
-                    const dataResponse = await fetch(`${this.backendUrl}/api/data`);
+                    const dataResponse = await fetch(`${this.backendUrl}/api/data`, { cache: 'no-store' });
                     if (dataResponse.ok) {
                         const data = await dataResponse.json();
+                        console.log('Fetched data from backend:', data);
                         this.data = data;
                         this.reconstructObjects();
-                        console.log('Data loaded from backend after init');
+                        console.log('Data loaded from backend after init. this.data is now:', this.data);
                         return true;
                     } else {
                         console.error('Failed to load data after init');

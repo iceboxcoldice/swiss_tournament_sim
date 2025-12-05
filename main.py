@@ -162,15 +162,16 @@ def pair_round():
         next_match_id = data.get('next_match_id', 1)
         
         for p in pairs:
-            # Check if it's a bye
-            if p[1] == -1:
-                # Bye
+            if len(p) == 1:
+                # Bye - this might not be reached if swiss_sim doesn't return byes in pairs
+                # But if it did return (Team,), we handle it.
+                # Assuming p[0] is Team object
                 m = {
                     "match_id": next_match_id,
                     "round_num": round_num,
-                    "aff_id": p[0],
+                    "aff_id": p[0].id,
                     "neg_id": -1,
-                    "aff_name": next(t.name for t in teams if t.id == p[0]),
+                    "aff_name": p[0].name,
                     "neg_name": "BYE",
                     "result": "A", # Auto-win for bye
                     "judge_id": -1,
@@ -180,10 +181,10 @@ def pair_round():
                 m = {
                     "match_id": next_match_id,
                     "round_num": round_num,
-                    "aff_id": p[0],
-                    "neg_id": p[1],
-                    "aff_name": next(t.name for t in teams if t.id == p[0]),
-                    "neg_name": next(t.name for t in teams if t.id == p[1]),
+                    "aff_id": p[0].id,
+                    "neg_id": p[1].id,
+                    "aff_name": p[0].name,
+                    "neg_name": p[1].name,
                     "result": None,
                     "judge_id": -1, # No judge assigned yet
                     "speaker_points": None
@@ -198,7 +199,7 @@ def pair_round():
         data['current_round'] = round_num
         
         if tm.save_tournament(data, teams):
-            return jsonify({"message": f"Paired Round {round_num}", "matches": new_matches}), 200
+            return jsonify({"message": f"Round {round_num} paired", "matches": new_matches}), 200
         else:
             return jsonify({"error": "Failed to save pairings"}), 500
             

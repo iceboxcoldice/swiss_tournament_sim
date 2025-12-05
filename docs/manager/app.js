@@ -40,6 +40,28 @@ function getElimRoundLabel(elimRoundNum, totalElimRounds) {
 function initUI() {
     if (tournament.data) {
         showDashboard();
+
+        // Handle initial hash
+        const hash = window.location.hash.substring(1);
+        if (hash) {
+            if (hash.startsWith('round')) {
+                showRound(parseInt(hash.replace('round', '')));
+            } else if (hash === 'standings') {
+                showStandings();
+            } else if (hash === 'entries') {
+                showEntries();
+            } else if (hash === 'judges') {
+                showJudges();
+            } else if (hash.startsWith('team')) {
+                showTeamDetails(parseInt(hash.replace('team', '')));
+            } else if (hash.startsWith('judge')) {
+                showJudgeDetails(parseInt(hash.replace('judge', '')));
+            } else {
+                showStandings();
+            }
+        } else {
+            showStandings();
+        }
     } else {
         showSetup();
     }
@@ -319,6 +341,11 @@ importFile.addEventListener('change', (e) => {
 
 // Update Dashboard
 function updateDashboard() {
+    console.log('updateDashboard called. tournament.data:', tournament.data);
+    if (!tournament.data) {
+        console.error('tournament.data is null in updateDashboard!');
+        return;
+    }
     // Update tournament info
     const { num_teams, num_prelim_rounds, num_elim_rounds, num_rounds } = tournament.data.config;
     const { current_round } = tournament.data;
@@ -335,6 +362,8 @@ function updateDashboard() {
 function renderTabs() {
     const matches = tournament.data.matches;
     const maxPairedRound = matches.length > 0 ? Math.max(...matches.map(m => m.round_num)) : 0;
+    console.log('renderTabs called. matches.length:', matches.length, 'maxPairedRound:', maxPairedRound);
+
 
     mainTabs.innerHTML = '';
 
@@ -463,7 +492,7 @@ async function handleNewRound() {
 }
 
 // Show Round View
-function showRound(roundNum) {
+function showRound(roundNum, highlightMatchId = null) {
     activeTab = `round${roundNum}`;
     window.location.hash = `round${roundNum}`;
 
@@ -551,7 +580,7 @@ function showRound(roundNum) {
         };
 
         return `
-                        <div class="pairing-item">
+                        <div class="pairing-item" id="match-${m.match_id}">
                             <div class="pairing-sections">
                                 <div class="team-section team-aff-section">
                                     <div class="team-header">
@@ -614,12 +643,18 @@ function showRound(roundNum) {
                                                             <button class="btn btn-sm btn-warning" onclick="changeJudgeAssignment(${m.match_id})" title="Change Judge">Change</button>
                                                             <button class="btn btn-sm btn-danger" onclick="unassignJudge(${m.match_id})" title="Unassign Judge">✕</button>
                                                         ` : `
-                                                            <select id="judge_select_${m.match_id}" style="flex: 1;">
-                                                                <option value="">-- Select Judge --</option>
-                                                                ${tournament.judges.map(judge => `
-                                                                    <option value="${judge.id}">${judge.name} (${judge.institution})</option>
-                                                                `).join('')}
-                                                            </select>
+                                                            <div class="judge-autocomplete-container">
+                                                                <input type="text" 
+                                                                    class="judge-search-input" 
+                                                                    placeholder="Type to search judge..." 
+                                                                    id="judge_search_${m.match_id}" 
+                                                                    oninput="filterJudges(this, ${m.match_id})"
+                                                                    onfocus="showAllJudges(${m.match_id})"
+                                                                    onkeydown="handleJudgeInputKey(event, ${m.match_id})"
+                                                                    autocomplete="off">
+                                                                <input type="hidden" id="judge_select_${m.match_id}">
+                                                                <div class="judge-results" id="judge_results_${m.match_id}"></div>
+                                                            </div>
                                                             <button class="btn btn-sm btn-primary" onclick="assignJudge(${m.match_id})">Assign</button>
                                                         `}
                                                     </div>
@@ -635,6 +670,21 @@ function showRound(roundNum) {
             </div>
         </div>
     `;
+
+    // Handle match highlighting
+    if (highlightMatchId) {
+        setTimeout(() => {
+            const matchElement = document.getElementById(`match-${highlightMatchId}`);
+            if (matchElement) {
+                matchElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                matchElement.classList.add('highlight-match');
+                // Remove class after animation completes
+                setTimeout(() => {
+                    matchElement.classList.remove('highlight-match');
+                }, 3000);
+            }
+        }, 100); // Small delay to ensure DOM is updated
+    }
 }
 
 // Generate Bracket HTML
@@ -1126,209 +1176,208 @@ window.showSpeakerPointInput = function (matchId, index) {
 };
 
 // Submit Speaker Point for Individual Participant
-window.submitSpeakerPoint = function (matchId, index) {
-    // Submit Speaker Point for Individual Participant
-    window.submitSpeakerPoint = async function (matchId, index) {
-        const inputId = `sp_input_${matchId}_${index}`;
-        const input = document.getElementById(inputId);
-        const value = parseFloat(input.value);
+// Submit Speaker Point for Individual Participant
+window.submitSpeakerPoint = async function (matchId, index) {
+    const inputId = `sp_input_${matchId}_${index}`;
+    const input = document.getElementById(inputId);
+    const value = parseFloat(input.value);
 
-        if (isNaN(value) || value < 0 || value > 30) {
-            showNotification('Invalid Input', 'Speaker points must be between 0 and 30.');
-            return;
-        }
+    if (isNaN(value) || value < 0 || value > 30) {
+        showNotification('Invalid Input', 'Speaker points must be between 0 and 30.');
+        return;
+    }
 
-        // Get current match data to preserve other points
-        const match = tournament.data.matches.find(m => m.match_id === parseInt(matchId));
-        if (!match) return;
+    // Get current match data to preserve other points
+    const match = tournament.data.matches.find(m => m.match_id === parseInt(matchId));
+    if (!match) return;
 
-        // Construct speaker points object
-        const currentSP = match.speaker_points || { affPoints: [null, null], negPoints: [null, null] };
-        const newSP = {
-            affPoints: [...currentSP.affPoints],
-            negPoints: [...currentSP.negPoints]
-        };
-
-        // Update specific point
-        if (index === 'aff_0') newSP.affPoints[0] = value;
-        if (index === 'aff_1') newSP.affPoints[1] = value;
-        if (index === 'neg_0') newSP.negPoints[0] = value;
-        if (index === 'neg_1') newSP.negPoints[1] = value;
-
-        try {
-            await tournament.updateResult(parseInt(matchId), match.result, newSP);
-            // Refresh view
-            const activeRound = parseInt(activeTab.replace('round', ''));
-            showRound(activeRound);
-        } catch (error) {
-            showNotification('Error', error.message);
-        }
+    // Construct speaker points object
+    const currentSP = match.speaker_points || { affPoints: [null, null], negPoints: [null, null] };
+    const newSP = {
+        affPoints: [...currentSP.affPoints],
+        negPoints: [...currentSP.negPoints]
     };
 
-    // Cancel Speaker Point Input
-    window.cancelSpeakerPointInput = function (matchId, index) {
-        const inputContainer = document.getElementById(`sp_input_${matchId}_${index}_container`);
-        const item = document.getElementById(`sp_item_${matchId}_${index}`);
+    // Update specific point
+    if (index === 'aff_0') newSP.affPoints[0] = value;
+    if (index === 'aff_1') newSP.affPoints[1] = value;
+    if (index === 'neg_0') newSP.negPoints[0] = value;
+    if (index === 'neg_1') newSP.negPoints[1] = value;
 
-        // Hide input container
-        inputContainer.classList.add('hidden');
+    try {
+        await tournament.updateResult(parseInt(matchId), match.result, newSP);
+        // Refresh view
+        const activeRound = parseInt(activeTab.replace('round', ''));
+        showRound(activeRound);
+    } catch (error) {
+        showNotification('Error', error.message);
+    }
+};
 
-        // Show the display elements
-        const displayElements = item.querySelectorAll('.btn, .speaker-point-value, .correction-buttons');
-        displayElements.forEach(el => el.style.display = '');
-    };
+// Cancel Speaker Point Input
+window.cancelSpeakerPointInput = function (matchId, index) {
+    const inputContainer = document.getElementById(`sp_input_${matchId}_${index}_container`);
+    const item = document.getElementById(`sp_item_${matchId}_${index}`);
 
-    // Correct Result (Switch Winner)
-    window.correctResult = function (matchId, currentResult) {
-        const newOutcome = currentResult === 'A' ? 'N' : 'A';
-        showConfirm(
-            'Switch Winner',
-            'Are you sure you want to switch the winner? This will update standings but preserve existing pairings.',
-            async () => { // Made callback async
-                try {
-                    await tournament.updateResult(matchId, newOutcome); // Added await
-                    // Refresh view
-                    const activeRound = parseInt(activeTab.replace('round', ''));
-                    showRound(activeRound); // Changed updateDashboard to showRound
-                } catch (error) {
-                    showNotification('Error', error.message);
-                }
-            }
-        );
-    };
+    // Hide input container
+    inputContainer.classList.add('hidden');
 
-    // Unsubmit Result
-    window.unsubmitResult = function (matchId) {
-        showConfirm(
-            'Unsubmit Result',
-            'Are you sure you want to remove this result? This will update standings but preserve existing pairings.',
-            () => {
-                try {
-                    tournament.updateResult(matchId, null);
-                    updateDashboard();
-                } catch (error) {
-                    showNotification('Error', error.message);
-                }
-            }
-        );
-    };
+    // Show the display elements
+    const displayElements = item.querySelectorAll('.btn, .speaker-point-value, .correction-buttons');
+    displayElements.forEach(el => el.style.display = '');
+};
 
-    // Show Team Details
-    window.showTeamDetails = function (teamId, previousView = null) {
-        const team = tournament.teams.find(t => t.id === teamId);
-        if (!team) return;
-
-        activeTab = `team${teamId}`;
-        window.location.hash = `team${teamId}`;
-
-        // Add to navigation history (avoid duplicates of current view)
-        if (navigationHistory[navigationHistory.length - 1] !== activeTab) {
-            navigationHistory.push(activeTab);
-        }
-
-        // Update active tab button (clear all active states)
-        const tabs = mainTabs.querySelectorAll('.tab-btn');
-        tabs.forEach(btn => btn.classList.remove('active'));
-
-        // Get all matches for this team
-        const teamMatches = tournament.data.matches.filter(m =>
-            m.aff_id === teamId || m.neg_id === teamId
-        ).sort((a, b) => a.round_num - b.round_num);
-
-        // Determine back button action from navigation history
-        let backAction = 'goBack()';
-        let backLabel = '← Back';
-
-        // Find the previous view from history (skip current team page)
-        const currentIndex = navigationHistory.length - 1;
-        // let previousView = null;
-
-        for (let i = currentIndex - 1; i >= 0; i--) {
-            const historyItem = navigationHistory[i];
-            if (historyItem !== activeTab && !historyItem.startsWith('team')) {
-                previousView = historyItem;
-                break;
-            } else if (historyItem.startsWith('team') && historyItem !== activeTab) {
-                // Found a different team page
-                previousView = historyItem;
-                break;
+// Correct Result (Switch Winner)
+window.correctResult = function (matchId, currentResult) {
+    const newOutcome = currentResult === 'A' ? 'N' : 'A';
+    showConfirm(
+        'Switch Winner',
+        'Are you sure you want to switch the winner? This will update standings but preserve existing pairings.',
+        async () => { // Made callback async
+            try {
+                await tournament.updateResult(matchId, newOutcome); // Added await
+                // Refresh view
+                const activeRound = parseInt(activeTab.replace('round', ''));
+                showRound(activeRound); // Changed updateDashboard to showRound
+            } catch (error) {
+                showNotification('Error', error.message);
             }
         }
+    );
+};
 
-        // Set label based on previous view
-        // Set label and active tab based on previous view
-        if (previousView) {
-            if (previousView.startsWith('round')) {
-                const roundNum = parseInt(previousView.replace('round', ''));
-                backLabel = `← Back to Round ${roundNum}`;
-
-                // Highlight the specific round tab
-                const roundTabBtn = Array.from(tabs).find(btn => btn.textContent === `Round ${roundNum}`);
-                if (roundTabBtn) roundTabBtn.classList.add('active');
-
-            } else if (previousView === 'standings') {
-                backLabel = '← Back to Standings';
-
-                // Highlight Standings tab
-                const standingsTabBtn = Array.from(tabs).find(btn => btn.textContent === 'Standings');
-                if (standingsTabBtn) standingsTabBtn.classList.add('active');
-
-            } else if (previousView === 'entries') {
-                // Highlight Entries tab
-                const entriesTabBtn = Array.from(tabs).find(btn => btn.textContent === 'Entries');
-                if (entriesTabBtn) entriesTabBtn.classList.add('active');
-
-            } else if (previousView.startsWith('team')) {
-                const prevTeamId = parseInt(previousView.replace('team', ''));
-                const prevTeam = tournament.teams.find(t => t.id === prevTeamId);
-                backLabel = prevTeam ? `← Back to ${prevTeam.name}` : '← Back';
-
-                // Keep the same tab active as the previous team view (recursive check needed or default to standings/entries)
-                // For simplicity, if coming from another team, we might not know the original source easily without deeper history analysis.
-                // But usually, we can infer or just leave it blank. 
-                // Better approach: Check the history before the team chain.
-
-                let sourceView = null;
-                for (let i = currentIndex - 1; i >= 0; i--) {
-                    const item = navigationHistory[i];
-                    if (!item.startsWith('team')) {
-                        sourceView = item;
-                        break;
-                    }
-                }
-
-                if (sourceView) {
-                    if (sourceView.startsWith('round')) {
-                        const rNum = parseInt(sourceView.replace('round', ''));
-                        const rBtn = Array.from(tabs).find(btn => btn.textContent === `Round ${rNum}`);
-                        if (rBtn) rBtn.classList.add('active');
-                    } else if (sourceView === 'standings') {
-                        const sBtn = Array.from(tabs).find(btn => btn.textContent === 'Standings');
-                        if (sBtn) sBtn.classList.add('active');
-                    } else if (sourceView === 'entries') {
-                        const eBtn = Array.from(tabs).find(btn => btn.textContent === 'Entries');
-                        if (eBtn) eBtn.classList.add('active');
-                    }
-                }
+// Unsubmit Result
+window.unsubmitResult = function (matchId) {
+    showConfirm(
+        'Unsubmit Result',
+        'Are you sure you want to remove this result? This will update standings but preserve existing pairings.',
+        () => {
+            try {
+                tournament.updateResult(matchId, null);
+                updateDashboard();
+            } catch (error) {
+                showNotification('Error', error.message);
             }
-        } else {
-            // No previous view found, default to standings
+        }
+    );
+};
+
+// Show Team Details
+window.showTeamDetails = function (teamId, previousView = null) {
+    const team = tournament.teams.find(t => t.id === teamId);
+    if (!team) return;
+
+    activeTab = `team${teamId}`;
+    window.location.hash = `team${teamId}`;
+
+    // Add to navigation history (avoid duplicates of current view)
+    if (navigationHistory[navigationHistory.length - 1] !== activeTab) {
+        navigationHistory.push(activeTab);
+    }
+
+    // Update active tab button (clear all active states)
+    const tabs = mainTabs.querySelectorAll('.tab-btn');
+    tabs.forEach(btn => btn.classList.remove('active'));
+
+    // Get all matches for this team
+    const teamMatches = tournament.data.matches.filter(m =>
+        m.aff_id === teamId || m.neg_id === teamId
+    ).sort((a, b) => a.round_num - b.round_num);
+
+    // Determine back button action from navigation history
+    let backAction = 'goBack()';
+    let backLabel = '← Back';
+
+    // Find the previous view from history (skip current team page)
+    const currentIndex = navigationHistory.length - 1;
+    // let previousView = null;
+
+    for (let i = currentIndex - 1; i >= 0; i--) {
+        const historyItem = navigationHistory[i];
+        if (historyItem !== activeTab && !historyItem.startsWith('team')) {
+            previousView = historyItem;
+            break;
+        } else if (historyItem.startsWith('team') && historyItem !== activeTab) {
+            // Found a different team page
+            previousView = historyItem;
+            break;
+        }
+    }
+
+    // Set label based on previous view
+    // Set label and active tab based on previous view
+    if (previousView) {
+        if (previousView.startsWith('round')) {
+            const roundNum = parseInt(previousView.replace('round', ''));
+            backLabel = `← Back to Round ${roundNum}`;
+
+            // Highlight the specific round tab
+            const roundTabBtn = Array.from(tabs).find(btn => btn.textContent === `Round ${roundNum}`);
+            if (roundTabBtn) roundTabBtn.classList.add('active');
+
+        } else if (previousView === 'standings') {
             backLabel = '← Back to Standings';
+
+            // Highlight Standings tab
             const standingsTabBtn = Array.from(tabs).find(btn => btn.textContent === 'Standings');
             if (standingsTabBtn) standingsTabBtn.classList.add('active');
+
+        } else if (previousView === 'entries') {
+            // Highlight Entries tab
+            const entriesTabBtn = Array.from(tabs).find(btn => btn.textContent === 'Entries');
+            if (entriesTabBtn) entriesTabBtn.classList.add('active');
+
+        } else if (previousView.startsWith('team')) {
+            const prevTeamId = parseInt(previousView.replace('team', ''));
+            const prevTeam = tournament.teams.find(t => t.id === prevTeamId);
+            backLabel = prevTeam ? `← Back to ${prevTeam.name}` : '← Back';
+
+            // Keep the same tab active as the previous team view (recursive check needed or default to standings/entries)
+            // For simplicity, if coming from another team, we might not know the original source easily without deeper history analysis.
+            // But usually, we can infer or just leave it blank. 
+            // Better approach: Check the history before the team chain.
+
+            let sourceView = null;
+            for (let i = currentIndex - 1; i >= 0; i--) {
+                const item = navigationHistory[i];
+                if (!item.startsWith('team')) {
+                    sourceView = item;
+                    break;
+                }
+            }
+
+            if (sourceView) {
+                if (sourceView.startsWith('round')) {
+                    const rNum = parseInt(sourceView.replace('round', ''));
+                    const rBtn = Array.from(tabs).find(btn => btn.textContent === `Round ${rNum}`);
+                    if (rBtn) rBtn.classList.add('active');
+                } else if (sourceView === 'standings') {
+                    const sBtn = Array.from(tabs).find(btn => btn.textContent === 'Standings');
+                    if (sBtn) sBtn.classList.add('active');
+                } else if (sourceView === 'entries') {
+                    const eBtn = Array.from(tabs).find(btn => btn.textContent === 'Entries');
+                    if (eBtn) eBtn.classList.add('active');
+                }
+            }
         }
+    } else {
+        // No previous view found, default to standings
+        backLabel = '← Back to Standings';
+        const standingsTabBtn = Array.from(tabs).find(btn => btn.textContent === 'Standings');
+        if (standingsTabBtn) standingsTabBtn.classList.add('active');
+    }
 
-        // Helper to get member name safely
-        const getMemberName = (member) => {
-            if (typeof member === 'string') return member;
-            if (member && member.name) return member.name;
-            return 'Unknown';
-        };
+    // Helper to get member name safely
+    const getMemberName = (member) => {
+        if (typeof member === 'string') return member;
+        if (member && member.name) return member.name;
+        return 'Unknown';
+    };
 
-        const member1Name = getMemberName(team.members[0]);
-        const member2Name = getMemberName(team.members[1]);
+    const member1Name = getMemberName(team.members[0]);
+    const member2Name = getMemberName(team.members[1]);
 
-        tabContent.innerHTML = `
+    tabContent.innerHTML = `
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
                 <div>
@@ -1374,33 +1423,33 @@ window.submitSpeakerPoint = function (matchId, index) {
                 </thead>
                 <tbody>
                     ${teamMatches.map(match => {
-            const isAff = match.aff_id === teamId;
-            const oppId = isAff ? match.neg_id : match.aff_id;
-            const oppName = isAff ? match.neg_name : match.aff_name;
-            const side = isAff ? 'Aff' : 'Neg';
+        const isAff = match.aff_id === teamId;
+        const oppId = isAff ? match.neg_id : match.aff_id;
+        const oppName = isAff ? match.neg_name : match.aff_name;
+        const side = isAff ? 'Aff' : 'Neg';
 
-            let result = '—';
-            let resultClass = '';
-            if (match.result !== null) {
-                const won = (isAff && match.result === 'A') || (!isAff && match.result === 'N');
-                result = won ? 'Win' : 'Loss';
-                resultClass = won ? 'result-win' : 'result-loss';
-            }
+        let result = '—';
+        let resultClass = '';
+        if (match.result !== null) {
+            const won = (isAff && match.result === 'A') || (!isAff && match.result === 'N');
+            result = won ? 'Win' : 'Loss';
+            resultClass = won ? 'result-win' : 'result-loss';
+        }
 
-            const { num_prelim_rounds, num_elim_rounds } = tournament.data.config;
-            let roundLabel = `Round ${match.round_num}`;
-            if (match.round_num > num_prelim_rounds) {
-                const elimRoundNum = match.round_num - num_prelim_rounds;
-                roundLabel = getElimRoundLabel(elimRoundNum, num_elim_rounds);
-            }
+        const { num_prelim_rounds, num_elim_rounds } = tournament.data.config;
+        let roundLabel = `Round ${match.round_num}`;
+        if (match.round_num > num_prelim_rounds) {
+            const elimRoundNum = match.round_num - num_prelim_rounds;
+            roundLabel = getElimRoundLabel(elimRoundNum, num_elim_rounds);
+        }
 
-            // Get speaker points for this round
-            const spHistory = team.speaker_points_history.find(h => h.round === match.round_num);
-            const points = spHistory ? spHistory.points : [null, null];
-            const p1Points = points[0] !== null ? points[0].toFixed(1) : '—';
-            const p2Points = points[1] !== null ? points[1].toFixed(1) : '—';
+        // Get speaker points for this round
+        const spHistory = team.speaker_points_history.find(h => h.round === match.round_num);
+        const points = spHistory ? spHistory.points : [null, null];
+        const p1Points = points[0] !== null ? points[0].toFixed(1) : '—';
+        const p2Points = points[1] !== null ? points[1].toFixed(1) : '—';
 
-            return `
+        return `
                             <tr>
                                 <td>${roundLabel}</td>
                                 <td>${side}</td>
@@ -1410,239 +1459,168 @@ window.submitSpeakerPoint = function (matchId, index) {
                                 <td>${p2Points}</td>
                             </tr>
                         `;
-        }).join('')}
+    }).join('')}
                 </tbody>
             </table>
         </div>
     `;
-    };
+};
 
-    // Go back to previous view
-    window.goBack = function () {
-        // Remove current view from history
-        navigationHistory.pop();
+// Go back to previous view
+window.goBack = function () {
+    console.log('goBack called. Current history:', JSON.stringify(navigationHistory));
+    console.log('Current activeTab:', activeTab);
 
-        // Find the previous non-team view or a different team view
-        let previousView = null;
-        while (navigationHistory.length > 0) {
-            const historyItem = navigationHistory.pop();
-            if (historyItem !== activeTab) {
-                previousView = historyItem;
-                break;
-            }
+    // Remove current view from history
+    navigationHistory.pop();
+
+    // Find the previous non-team view or a different team view
+    let previousView = null;
+    while (navigationHistory.length > 0) {
+        const historyItem = navigationHistory.pop();
+        console.log('Checking history item:', historyItem);
+        if (historyItem !== activeTab) {
+            previousView = historyItem;
+            break;
         }
+    }
 
-        // Navigate to previous view or default to standings
-        if (previousView) {
-            if (previousView.startsWith('round')) {
-                const roundNum = parseInt(previousView.replace('round', ''));
-                showRound(roundNum);
-            } else if (previousView === 'standings') {
-                showStandings();
-            } else if (previousView.startsWith('team')) {
-                const teamId = parseInt(previousView.replace('team', ''));
-                showTeamDetails(teamId);
-            }
-        } else {
+    console.log('Found previousView:', previousView);
+
+    // Navigate to previous view or default to standings
+    if (previousView) {
+        if (previousView.startsWith('round')) {
+            const roundNum = parseInt(previousView.replace('round', ''));
+            showRound(roundNum);
+        } else if (previousView === 'standings') {
             showStandings();
+        } else if (previousView === 'entries') {
+            showEntries();
+        } else if (previousView === 'judges') {
+            showJudges();
+        } else if (previousView.startsWith('team')) {
+            const teamId = parseInt(previousView.replace('team', ''));
+            showTeamDetails(teamId);
+        } else if (previousView.startsWith('judge')) {
+            const judgeId = parseInt(previousView.replace('judge', ''));
+            showJudgeDetails(judgeId);
         }
-    };
-
-    // Judge Management Functions
-    window.showAddJudgeForm = function () {
-        const form = document.getElementById('addJudgeForm');
-        if (form) {
-            form.classList.remove('hidden');
-            document.getElementById('judgeName').focus();
-        }
-    };
-
-    window.hideAddJudgeForm = function () {
-        const form = document.getElementById('addJudgeForm');
-        if (form) {
-            form.classList.add('hidden');
-            // Clear form fields
-            document.getElementById('judgeName').value = '';
-            document.getElementById('judgeInstitution').value = '';
-        }
-    };
-
-    function submitAddJudge(event) {
-        event.preventDefault();
-
-        const name = document.getElementById('judgeName').value.trim();
-        const institution = document.getElementById('judgeInstitution').value.trim();
-
-        try {
-            tournament.addJudge(name, institution);
-            hideAddJudgeForm(); // Hide form after successful add
-            showJudges(); // Refresh the view
-            showNotification('Success', `Judge "${name}" added successfully!`);
-        } catch (error) {
-            showNotification('Error', error.message);
-        }
+    } else {
+        console.log('No previous view found, defaulting to standings');
+        showStandings();
     }
+};
 
-    function deleteJudge(judgeId) {
-        const judge = tournament.judges.find(j => j.id === judgeId);
-        if (!judge) return;
-
-        showConfirm(
-            'Delete Judge',
-            `Are you sure you want to delete judge "${judge.name}"?`,
-            () => {
-                try {
-                    tournament.removeJudge(judgeId);
-                    showJudges(); // Refresh the view
-                    showNotification('Success', `Judge "${judge.name}" deleted successfully!`);
-                } catch (error) {
-                    showNotification('Error', error.message);
-                }
-            }
-        );
+// Judge Management Functions
+window.showAddJudgeForm = function () {
+    const form = document.getElementById('addJudgeForm');
+    if (form) {
+        form.classList.remove('hidden');
+        document.getElementById('judgeName').focus();
     }
+};
 
-    function showJudgeDetails(judgeId) {
-        const judge = tournament.judges.find(j => j.id === judgeId);
-        if (!judge) {
-            showNotification('Error', 'Judge not found');
-            return;
-        }
-
-        activeTab = `judge${judgeId}`;
-        window.location.hash = `judge${judgeId}`;
-
-        // Add to navigation history
-        if (navigationHistory[navigationHistory.length - 1] !== activeTab) {
-            navigationHistory.push(activeTab);
-        }
-
-        // Update active state (no specific tab for judge details)
-        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-
-        // Get matches this judge has judged
-        const judgedMatches = tournament.data.matches.filter(m => m.judge_id === judgeId);
-
-        tabContent.innerHTML = `
-        <div class="card">
-            <button class="btn btn-secondary" onclick="goBack()" style="margin-bottom: 1rem;">← Back</button>
-            
-            <h3>Judge Details: ${judge.name}</h3>
-            
-            <div class="stats-grid" style="margin-top: 1.5rem; margin-bottom: 2rem;">
-                <div class="stat-card">
-                    <div class="stat-label">Institution</div>
-                    <div class="stat-value">${judge.institution}</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">Matches Judged</div>
-                    <div class="stat-value">${judge.matches_judged.length}</div>
-                </div>
-            </div>
-
-            ${judgedMatches.length > 0 ? `
-                <h4 style="margin-top: 2rem; margin-bottom: 1rem;">Judging History</h4>
-                <table class="standings-table">
-                    <thead>
-                        <tr>
-                            <th>Round</th>
-                            <th>Match ID</th>
-                            <th>Aff Team</th>
-                            <th>Neg Team</th>
-                            <th>Result</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${judgedMatches.map(match => {
-            const affTeam = tournament.teams.find(t => t.id === match.aff_id);
-            const negTeam = tournament.teams.find(t => t.id === match.neg_id);
-            const roundLabel = match.round_num <= tournament.data.config.num_prelim_rounds
-                ? `Round ${match.round_num}`
-                : getElimRoundLabel(match.round_num - tournament.data.config.num_prelim_rounds, tournament.data.config.num_elim_rounds);
-
-            return `
-                                <tr>
-                                    <td>${roundLabel}</td>
-                                    <td>${match.match_id}</td>
-                                    <td>
-                                        <a href="#" onclick="showTeamDetails(${match.aff_id}, 'judge${judgeId}'); return false;" class="team-link">
-                                            ${affTeam ? affTeam.name : 'Unknown'}
-                                        </a>
-                                    </td>
-                                    <td>
-                                        <a href="#" onclick="showTeamDetails(${match.neg_id}, 'judge${judgeId}'); return false;" class="team-link">
-                                            ${negTeam ? negTeam.name : 'Unknown'}
-                                        </a>
-                                    </td>
-                                    <td>${match.result === 'A' ? 'Aff Won' : match.result === 'N' ? 'Neg Won' : 'Pending'}</td>
-                                </tr>
-                            `;
-        }).join('')}
-                    </tbody>
-                </table>
-            ` : `
-                <p class="text-muted" style="text-align: center; padding: 2rem;">
-                    This judge has not been assigned to any matches yet.
-                </p>
-            `}
-        </div>
-    `;
+window.hideAddJudgeForm = function () {
+    const form = document.getElementById('addJudgeForm');
+    if (form) {
+        form.classList.add('hidden');
+        // Clear form fields
+        document.getElementById('judgeName').value = '';
+        document.getElementById('judgeInstitution').value = '';
     }
+};
 
-    // Judge Assignment Functions
-    function assignJudge(matchId) {
-        const selectElement = document.getElementById(`judge_select_${matchId}`);
-        if (!selectElement) return;
+function submitAddJudge(event) {
+    event.preventDefault();
 
-        const judgeId = parseInt(selectElement.value);
-        if (!judgeId) {
-            showNotification('Error', 'Please select a judge');
-            return;
-        }
+    const name = document.getElementById('judgeName').value.trim();
+    const institution = document.getElementById('judgeInstitution').value.trim();
 
-        try {
-            tournament.assignJudgeToMatch(matchId, judgeId);
-            // Refresh the current round view
-            const match = tournament.data.matches.find(m => m.match_id === matchId);
-            if (match) {
-                showRound(match.round_num);
-            }
-            const judge = tournament.judges.find(j => j.id === judgeId);
-            showNotification('Success', `Judge "${judge.name}" assigned to Match ${matchId}`);
-        } catch (error) {
-            showNotification('Error', error.message);
-        }
+    try {
+        tournament.addJudge(name, institution);
+        hideAddJudgeForm(); // Hide form after successful add
+        showJudges(); // Refresh the view
+        showNotification('Success', `Judge "${name}" added successfully!`);
+    } catch (error) {
+        showNotification('Error', error.message);
     }
-
-    function unassignJudge(matchId) {
-        try {
-            tournament.unassignJudgeFromMatch(matchId);
-            // Refresh the current round view
-            const match = tournament.data.matches.find(m => m.match_id === matchId);
-            if (match) {
-                showRound(match.round_num);
-            }
-            showNotification('Success', `Judge unassigned from Match ${matchId}`);
-        } catch (error) {
-            showNotification('Error', error.message);
-        }
-    }
-
-    function changeJudgeAssignment(matchId) {
-        // Unassign current judge and refresh to show dropdown
-        unassignJudge(matchId);
-    };
-
-    // Handle browser back/forward navigation
-    window.addEventListener('hashchange', () => {
-        if (tournament.data) {
-            updateDashboard();
-        }
-    });
-
-    // Initialize on load
-    initUI();
 }
+
+function deleteJudge(judgeId) {
+    const judge = tournament.judges.find(j => j.id === judgeId);
+    if (!judge) return;
+
+    showConfirm(
+        'Delete Judge',
+        `Are you sure you want to delete judge "${judge.name}"?`,
+        () => {
+            try {
+                tournament.removeJudge(judgeId);
+                showJudges(); // Refresh the view
+                showNotification('Success', `Judge "${judge.name}" deleted successfully!`);
+            } catch (error) {
+                showNotification('Error', error.message);
+            }
+        }
+    );
+}
+
+
+
+// Judge Assignment Functions
+function assignJudge(matchId) {
+    const selectElement = document.getElementById(`judge_select_${matchId}`);
+    if (!selectElement) return;
+
+    const judgeId = parseInt(selectElement.value);
+    if (!judgeId) {
+        showNotification('Error', 'Please select a judge');
+        return;
+    }
+
+    try {
+        tournament.assignJudgeToMatch(matchId, judgeId);
+        // Refresh the current round view
+        const match = tournament.data.matches.find(m => m.match_id === matchId);
+        if (match) {
+            showRound(match.round_num);
+        }
+        const judge = tournament.judges.find(j => j.id === judgeId);
+        showNotification('Success', `Judge "${judge.name}" assigned to Match ${matchId}`);
+    } catch (error) {
+        showNotification('Error', error.message);
+    }
+}
+
+function unassignJudge(matchId) {
+    try {
+        tournament.unassignJudgeFromMatch(matchId);
+        // Refresh the current round view
+        const match = tournament.data.matches.find(m => m.match_id === matchId);
+        if (match) {
+            showRound(match.round_num);
+        }
+        showNotification('Success', `Judge unassigned from Match ${matchId}`);
+    } catch (error) {
+        showNotification('Error', error.message);
+    }
+}
+
+function changeJudgeAssignment(matchId) {
+    // Unassign current judge and refresh to show dropdown
+    unassignJudge(matchId);
+};
+
+// Handle browser back/forward navigation
+window.addEventListener('hashchange', () => {
+    if (tournament.data) {
+        updateDashboard();
+    }
+});
+
+// Initialize on load
+initUI();
+
 
 // Judge Management Functions (moved outside showTeamDetails)
 window.showAddJudgeForm = function () {
@@ -1714,65 +1692,83 @@ window.showJudgeDetails = function (judgeId) {
     }
 
     // Update active state (no specific tab for judge details)
-    const tabs = mainTabs.querySelectorAll('.tab-btn');
-    tabs.forEach(tab => tab.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
-    // Get matches assigned to this judge
-    const assignedMatches = tournament.data.matches.filter(m => m.judge_id === judgeId);
+    // Get matches this judge has judged
+    const judgedMatches = tournament.data.matches.filter(m => m.judge_id === judgeId);
 
-    dashboardSection.innerHTML = `
-        <div class="back-button-container">
-            <button class="btn btn-secondary" onclick="goBack()">← Back</button>
-        </div>
-        <h3>Judge Details: ${judge.name}</h3>
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-label">Name</div>
-                <div class="stat-value">${judge.name}</div>
+    tabContent.innerHTML = `
+        <div class="card">
+            <button class="btn btn-secondary" onclick="goBack()" style="margin-bottom: 1rem;">← Back</button>
+            
+            <h3>Judge Details: ${judge.name}</h3>
+            
+            <div class="stats-grid" style="margin-top: 1.5rem; margin-bottom: 2rem;">
+                <div class="stat-card">
+                    <div class="stat-label">Institution</div>
+                    <div class="stat-value">${judge.institution}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Matches Judged</div>
+                    <div class="stat-value">${judge.matches_judged.length}</div>
+                </div>
             </div>
-            <div class="stat-card">
-                <div class="stat-label">Institution</div>
-                <div class="stat-value">${judge.institution || 'Tournament Hire'}</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Matches Assigned</div>
-                <div class="stat-value">${assignedMatches.length}</div>
-            </div>
-        </div>
 
-        <h4 style="margin-top: 2rem; margin-bottom: 1rem;">Assigned Matches</h4>
-        ${assignedMatches.length === 0 ? '<p>No matches assigned yet.</p>' : `
-            <table class="standings-table">
-                <thead>
-                    <tr>
-                        <th>Round</th>
-                        <th>Match ID</th>
-                        <th>Aff</th>
-                        <th>Neg</th>
-                        <th>Result</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${assignedMatches.map(m => {
-        const roundLabel = m.round_num <= tournament.data.config.num_rounds
-            ? `Round ${m.round_num}`
-            : getElimRoundLabel(m.round_num - tournament.data.config.num_rounds, tournament.data.config.num_elim_rounds);
-        const result = m.result === 'A' ? 'Aff' : m.result === 'N' ? 'Neg' : '—';
+            ${judgedMatches.length > 0 ? `
+                <h4 style="margin-top: 2rem; margin-bottom: 1rem;">Judging History</h4>
+                <table class="standings-table">
+                    <thead>
+                        <tr>
+                            <th>Round</th>
+                            <th>Match ID</th>
+                            <th>Aff Team</th>
+                            <th>Neg Team</th>
+                            <th>Decision</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${judgedMatches.map(match => {
+        const affTeam = tournament.teams.find(t => t.id === match.aff_id);
+        const negTeam = tournament.teams.find(t => t.id === match.neg_id);
+        const roundLabel = match.round_num <= tournament.data.config.num_prelim_rounds
+            ? `Round ${match.round_num}`
+            : getElimRoundLabel(match.round_num - tournament.data.config.num_prelim_rounds, tournament.data.config.num_elim_rounds);
+
         return `
-                            <tr>
-                                <td>${roundLabel}</td>
-                                <td>${m.match_id}</td>
-                                <td><a href="#" onclick="showTeamDetails(${m.aff_id}); return false;" class="team-link">${m.aff_name}</a></td>
-                                <td>${m.neg_id === -1 ? 'BYE' : `<a href="#" onclick="showTeamDetails(${m.neg_id}); return false;" class="team-link">${m.neg_name}</a>`}</td>
-                                <td>${result}</td>
-                            </tr>
-                        `;
+                                <tr>
+                                    <td>${roundLabel}</td>
+                                    <td>
+                                        <a href="#" onclick="showRound(${match.round_num}, ${match.match_id}); return false;" class="team-link" title="View in Round">
+                                            ${match.match_id}
+                                        </a>
+                                    </td>
+                                    <td>
+                                        <a href="#" onclick="showTeamDetails(${match.aff_id}, 'judge${judgeId}'); return false;" class="team-link">
+                                            ${affTeam ? affTeam.name : 'Unknown'}
+                                        </a>
+                                    </td>
+                                    <td>
+                                        <a href="#" onclick="showTeamDetails(${match.neg_id}, 'judge${judgeId}'); return false;" class="team-link">
+                                            ${negTeam ? negTeam.name : 'Unknown'}
+                                        </a>
+                                    </td>
+                                    <td>${match.result === 'A' ? 'Aff' : match.result === 'N' ? 'Neg' : 'Pending'}</td>
+                                </tr>
+                            `;
     }).join('')}
-                </tbody>
-            </table>
-        `}
+                    </tbody>
+                </table>
+            ` : `
+                <p class="text-muted" style="text-align:center; padding: 2rem;">
+                    This judge has not been assigned to any matches yet.
+                </p>
+            `}
+        </div>
     `;
 };
+
+
+
 
 window.assignJudge = function (matchId) {
     const selectElement = document.getElementById(`judge_select_${matchId}`);
@@ -1815,4 +1811,94 @@ window.unassignJudge = function (matchId) {
 window.changeJudgeAssignment = function (matchId) {
     // Unassign current judge and refresh to show dropdown
     unassignJudge(matchId);
+};
+
+// Judge Autocomplete Functions
+window.filterJudges = function (input, matchId) {
+    const filter = input.value.toLowerCase();
+    const resultsDiv = document.getElementById(`judge_results_${matchId}`);
+    const hiddenInput = document.getElementById(`judge_select_${matchId}`);
+
+    // Clear previous selection if user is typing
+    if (hiddenInput.value && input.value !== input.getAttribute('data-selected-name')) {
+        hiddenInput.value = '';
+    }
+
+    // Filter judges
+    const filteredJudges = tournament.judges.filter(judge =>
+        judge.name.toLowerCase().includes(filter) ||
+        judge.institution.toLowerCase().includes(filter)
+    );
+
+    renderJudgeResults(filteredJudges, matchId, resultsDiv);
+};
+
+window.showAllJudges = function (matchId) {
+    const resultsDiv = document.getElementById(`judge_results_${matchId}`);
+    renderJudgeResults(tournament.judges, matchId, resultsDiv);
+};
+
+function renderJudgeResults(judges, matchId, resultsDiv) {
+    resultsDiv.innerHTML = '';
+
+    if (judges.length === 0) {
+        resultsDiv.style.display = 'none';
+        return;
+    }
+
+    judges.forEach(judge => {
+        const div = document.createElement('div');
+        div.className = 'judge-result-item';
+        div.textContent = `${judge.name} (${judge.institution})`;
+        div.dataset.judgeId = judge.id;
+        div.dataset.judgeName = judge.name;
+        div.onclick = function () {
+            selectJudge(judge, matchId);
+        };
+        resultsDiv.appendChild(div);
+    });
+
+    resultsDiv.style.display = 'block';
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function closeDropdown(e) {
+        if (!resultsDiv.contains(e.target) && e.target.id !== `judge_search_${matchId}`) {
+            resultsDiv.style.display = 'none';
+            document.removeEventListener('click', closeDropdown);
+        }
+    });
+}
+
+window.selectJudge = function (judge, matchId) {
+    const input = document.getElementById(`judge_search_${matchId}`);
+    const hiddenInput = document.getElementById(`judge_select_${matchId}`);
+    const resultsDiv = document.getElementById(`judge_results_${matchId}`);
+
+    input.value = judge.name;
+    input.setAttribute('data-selected-name', judge.name); // Store name to check against typing
+    hiddenInput.value = judge.id;
+    resultsDiv.style.display = 'none';
+};
+
+window.handleJudgeInputKey = function (event, matchId) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        const hiddenInput = document.getElementById(`judge_select_${matchId}`);
+        const resultsDiv = document.getElementById(`judge_results_${matchId}`);
+
+        // If no judge selected yet, try to select the first visible result
+        if (!hiddenInput.value && resultsDiv.style.display !== 'none') {
+            const firstResult = resultsDiv.querySelector('.judge-result-item');
+            if (firstResult) {
+                const judge = {
+                    id: parseInt(firstResult.dataset.judgeId),
+                    name: firstResult.dataset.judgeName
+                };
+                selectJudge(judge, matchId);
+            }
+        }
+
+        // Trigger assignment
+        assignJudge(matchId);
+    }
 };
