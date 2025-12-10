@@ -206,8 +206,8 @@ async function runHeadToHeadSimulation(params, progressCallback) {
                         teamARanks.push(teamA.trueRank);
                         teamBRanks.push(teamB.trueRank);
 
-                        const probA = probabilityOfWin(teamA, teamB, winModel);
-                        if (Math.random() < probA) {
+                        // Use actual match result from tournament history
+                        if (teamA.history[targetRound] === 'W') {
                             teamAWins++;
                         } else {
                             teamBWins++;
