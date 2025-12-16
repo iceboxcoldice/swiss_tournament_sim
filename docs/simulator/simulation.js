@@ -92,7 +92,7 @@ function pairRound(teams, roundNum, useBuchholz) {
             group.sort((a, b) => {
                 if (b.score !== a.score) return b.score - a.score;
                 if (useBuchholz && b.buchholz !== a.buchholz) return b.buchholz - a.buchholz;
-                return a.trueRank - b.trueRank;
+                return 0; // Maintain shuffled order (random)
             });
         }
 
@@ -222,6 +222,9 @@ async function runHeadToHeadSimulation(params, progressCallback) {
         await new Promise(resolve => setTimeout(resolve, 0));
     }
 
+    // NOTE: In floating scenarios (e.g. WW vs WL), the WW team is often the "worst" 2-0 team 
+    // floating down to play the "best" 1-1 team. So avgRankA (WW) being worse (higher #) 
+    // than avgRankB (WL) is actually evaluating the correct specific teams that meet.
     return {
         totalSims,
         matchupCount,

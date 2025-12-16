@@ -185,9 +185,17 @@ def main():
                       "".join(t.history[:len(HISTORY_B)]) == HISTORY_B]
             
             # Check if any teams with history_a played against teams with history_b
+            # ONLY in the very next round after the history
+            target_round = len(HISTORY_A)
+            
             for team_a in teams_a:
+                # Ensure target round exists
+                if target_round >= len(team_a.opponent_history):
+                    continue
+                    
                 for team_b in teams_b:
-                    if team_b.id in team_a.opponents:
+                    # Check if they played in the specific target round
+                    if team_a.opponent_history[target_round] == team_b.id:
                         matchup_count += 1
                         team_a_ranks.append(team_a.true_rank)
                         team_b_ranks.append(team_b.true_rank)

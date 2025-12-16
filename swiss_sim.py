@@ -206,9 +206,9 @@ def pair_round(teams: List[Team], round_num: int, use_buchholz: bool = False) ->
             # If true_rank is 0 (real tournament), it won't affect sorting much, 
             # effectively random within score/buchholz groups due to initial shuffle.
             if use_buchholz:
-                group.sort(key=lambda t: (t.score, t.buchholz, -t.true_rank), reverse=True)
+                group.sort(key=lambda t: (t.score, t.buchholz), reverse=True)
             else:
-                group.sort(key=lambda t: (t.score, -t.true_rank), reverse=True)
+                group.sort(key=lambda t: t.score, reverse=True)
         
         while group:
             t1 = group.pop(0)
