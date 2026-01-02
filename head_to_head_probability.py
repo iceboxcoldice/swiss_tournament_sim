@@ -24,7 +24,7 @@ from swiss_utils import (
 )
 
 # Import core simulation functions and Team class
-from swiss_sim import Team, run_tournament, probability_of_win
+from swiss_sim import Team, run_tournament, probability_of_win, lcg_random, set_seed
 import random
 
 
@@ -65,9 +65,8 @@ def adaptive_simulation(num_teams, num_rounds, history_a, history_b, use_buchhol
                     # Check if they played in the specific target round
                     if team_a.opponent_history[target_round] == team_b.id:
                         # They played each other in the target round
-                        # Simulate the matchup outcome using probability_of_win
-                        prob_a_wins = probability_of_win(team_a, team_b)
-                        a_wins = random.random() < prob_a_wins
+                        # Use actual match result from tournament history (matches JS behavior)
+                        a_wins = team_a.history[target_round] == 'W'
                         
                         matchups.append({
                             'team_a_rank': team_a.true_rank,
@@ -115,6 +114,12 @@ def main():
         default=100,
         help="Minimum matchups needed for adaptive mode (default: 100)",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Seed for PRNG (default: None)",
+    )
     add_common_args(parser)
 
     args = parser.parse_args()
@@ -132,6 +137,10 @@ def main():
     MIN_MATCHUPS = args.min_matchups
     USE_BUCHHOLZ = not args.donotuse_buchholz_pairing
     WIN_MODEL = args.win_model
+    SEED = args.seed
+
+    if SEED is not None:
+        set_seed(SEED)
 
     # Validate histories
     if len(HISTORY_A) > NUM_ROUNDS or len(HISTORY_B) > NUM_ROUNDS:
@@ -200,9 +209,8 @@ def main():
                         team_a_ranks.append(team_a.true_rank)
                         team_b_ranks.append(team_b.true_rank)
                         
-                        # Simulate matchup using probability_of_win
-                        prob_a_wins = probability_of_win(team_a, team_b)
-                        if random.random() < prob_a_wins:
+                        # Use actual match result from tournament history (matches JS behavior)
+                        if team_a.history[target_round] == 'W':
                             team_a_wins += 1
                         else:
                             team_b_wins += 1

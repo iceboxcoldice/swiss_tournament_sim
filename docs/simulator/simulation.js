@@ -1,5 +1,18 @@
 // simulation.js - Core simulation logic
 
+// Consistent LCG-based PRNG for Python/JS alignment
+let _seed = 12345;
+
+function setSeed(newSeed) {
+    _seed = newSeed;
+}
+
+function lcgRandom() {
+    // Parameters for LCG (same as used in Python)
+    _seed = (_seed * 1664525 + 1013904223) % 4294967296;
+    return _seed / 4294967296;
+}
+
 // Team class
 class Team {
     constructor(id, trueRank) {
@@ -10,6 +23,10 @@ class Team {
         this.opponentHistory = [];
         this.buchholz = 0;
         this.wins = 0;
+        this.aff = 0;
+        this.neg = 0;
+        this.lastSide = null; // 'Aff' or 'Neg'
+        this.sideHistory = {}; // OppId -> ['Aff', 'Neg', ...]
     }
 }
 
@@ -32,9 +49,84 @@ function probabilityOfWin(teamA, teamB, winModel = 'elo') {
 }
 
 // Simulate a match
+// Simulate a match
 function simulateMatch(teamA, teamB, winModel) {
     const probA = probabilityOfWin(teamA, teamB, winModel);
-    return Math.random() < probA ? [1, 0] : [0, 1];
+    return lcgRandom() < probA ? [1, 0] : [0, 1];
+}
+
+// Calculate side preference score (Positive=Wants Aff, Negative=Wants Neg)
+function calculateSidePreference(team) {
+    let pref = team.neg - team.aff;
+    if (team.lastSide === 'Neg') {
+        pref += 2.0;
+    } else if (team.lastSide === 'Aff') {
+        pref -= 2.0;
+    }
+    return pref;
+}
+
+// Find best opponent for t1 in group
+function findBestOpponent(t1, group) {
+    let bestNonRepeat = null;
+    let bestNonRepeatIdx = -1;
+    let bestSwappable = null;
+    let bestSwappableIdx = -1;
+
+    for (let i = 0; i < group.length; i++) {
+        const candidate = group[i];
+
+        // Check repeat
+        if (!t1.opponentHistory.includes(candidate.id)) {
+            // Priority 1: Non-repeat
+            bestNonRepeat = candidate;
+            bestNonRepeatIdx = i;
+            break; // Strict Swiss: take first valid
+        } else {
+            // Check for swappable repeat
+            if (bestSwappable === null) {
+                const sidesPlayed = t1.sideHistory[candidate.id] || [];
+                const canPlayAff = !sidesPlayed.includes('Aff');
+                const canPlayNeg = !sidesPlayed.includes('Neg');
+
+                if (canPlayAff || canPlayNeg) {
+                    bestSwappable = candidate;
+                    bestSwappableIdx = i;
+                }
+            }
+        }
+    }
+
+    if (bestNonRepeat) {
+        return { opponent: bestNonRepeat, idx: bestNonRepeatIdx, isSwappable: false };
+    } else if (bestSwappable) {
+        return { opponent: bestSwappable, idx: bestSwappableIdx, isSwappable: true };
+    }
+
+    return { opponent: null, idx: -1, isSwappable: false };
+}
+
+// Determine sides based on history
+function determineSides(teamA, teamB, isSwappable = false) {
+    if (isSwappable) {
+        const sidesPlayed = teamA.sideHistory[teamB.id] || [];
+        const canPlayAff = !sidesPlayed.includes('Aff');
+        const canPlayNeg = !sidesPlayed.includes('Neg');
+
+        if (canPlayAff && !canPlayNeg) return [teamA, teamB];
+        if (canPlayNeg && !canPlayAff) return [teamB, teamA];
+    }
+
+    const prefA = calculateSidePreference(teamA);
+    const prefB = calculateSidePreference(teamB);
+
+    if (prefA > prefB) { // A wants Aff more
+        return [teamA, teamB];
+    } else if (prefB > prefA) { // B wants Aff more
+        return [teamB, teamA];
+    } else {
+        return lcgRandom() < 0.5 ? [teamA, teamB] : [teamB, teamA];
+    }
 }
 
 // Update Buchholz scores
@@ -64,7 +156,7 @@ function pairRound(teams, roundNum, useBuchholz) {
 
     // Shuffle for randomization
     for (let i = teamsCopy.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = Math.floor(lcgRandom() * (i + 1));
         [teamsCopy[i], teamsCopy[j]] = [teamsCopy[j], teamsCopy[i]];
     }
 
@@ -81,52 +173,52 @@ function pairRound(teams, roundNum, useBuchholz) {
 
     const sortedScores = Object.keys(scoreGroups).map(Number).sort((a, b) => b - a);
     const pairs = [];
-    const remaining = [];
+    let floaters = [];
 
     for (const score of sortedScores) {
-        const group = [...scoreGroups[score], ...remaining];
-        remaining.length = 0;
+        const group = [...scoreGroups[score]];
+        // Add floaters
+        group.push(...floaters);
+        floaters = [];
 
-        // Sort to match Python logic (Score -> Buchholz -> True Rank)
+        // Sort
         if (roundNum > 1) {
             group.sort((a, b) => {
                 if (b.score !== a.score) return b.score - a.score;
+                // User-defined logic: Sort by Score, then Buchholz, then Random
                 if (useBuchholz && b.buchholz !== a.buchholz) return b.buchholz - a.buchholz;
                 return 0; // Maintain shuffled order (random)
             });
         }
 
-        while (group.length >= 2) {
+        while (group.length > 0) {
             const t1 = group.shift();
-            let opponentIdx = -1;
+            const { opponent, idx, isSwappable } = findBestOpponent(t1, group);
 
-            for (let i = 0; i < group.length; i++) {
-                if (!t1.opponentHistory.includes(group[i].id)) {
-                    opponentIdx = i;
-                    break;
-                }
-            }
-
-            if (opponentIdx >= 0) {
-                const t2 = group.splice(opponentIdx, 1)[0];
-                pairs.push([t1, t2]);
-            } else if (group.length > 0) {
-                const t2 = group.shift();
-                pairs.push([t1, t2]);
+            if (opponent) {
+                group.splice(idx, 1);
+                pairs.push(determineSides(t1, opponent, isSwappable));
             } else {
-                remaining.push(t1);
+                floaters.push(t1);
             }
         }
-
-        remaining.push(...group);
     }
 
-    // Handle bye
-    if (remaining.length > 0) {
-        remaining[0].score += 1;
-        remaining[0].wins += 1;
-        remaining[0].history.push('W');
-        remaining[0].opponentHistory.push(-1);
+    // Handle floaters
+    if (floaters.length > 0) {
+        while (floaters.length >= 2) {
+            const t1 = floaters.shift();
+            // Just take next one
+            const t2 = floaters.shift();
+            pairs.push(determineSides(t1, t2, false));
+        }
+        if (floaters.length > 0) {
+            // Bye
+            floaters[0].score += 1;
+            floaters[0].wins += 1;
+            floaters[0].history.push('W');
+            floaters[0].opponentHistory.push(-1);
+        }
     }
 
     return pairs;
@@ -139,23 +231,40 @@ function runTournament(numTeams, numRounds, useBuchholz, winModel) {
     for (let round = 0; round < numRounds; round++) {
         const pairs = pairRound(teams, round, useBuchholz);
 
-        for (const [t1, t2] of pairs) {
-            const [s1, s2] = simulateMatch(t1, t2, winModel);
-            t1.score += s1;
-            t2.score += s2;
-            t1.opponentHistory.push(t2.id);
-            t2.opponentHistory.push(t1.id);
+        for (const [teamA, teamB] of pairs) {
+            // teamA is Aff, teamB is Neg (assigned by determineSides)
+            teamA.aff++;
+            teamB.neg++;
+            teamA.lastSide = 'Aff';
+            teamB.lastSide = 'Neg';
+
+            // Update side history
+            if (!teamA.sideHistory[teamB.id]) teamA.sideHistory[teamB.id] = [];
+            teamA.sideHistory[teamB.id].push('Aff');
+
+            if (!teamB.sideHistory[teamA.id]) teamB.sideHistory[teamA.id] = [];
+            teamB.sideHistory[teamA.id].push('Neg');
+
+            const [s1, s2] = simulateMatch(teamA, teamB, winModel);
+            teamA.score += s1;
+            teamB.score += s2;
+            teamA.opponentHistory.push(teamB.id);
+            teamB.opponentHistory.push(teamA.id);
 
             if (s1 > s2) {
-                t1.wins += 1;
-                t1.history.push('W');
-                t2.history.push('L');
+                teamA.wins += 1;
+                teamA.history.push('W');
+                teamB.history.push('L');
             } else {
-                t2.wins += 1;
-                t2.history.push('W');
-                t1.history.push('L');
+                teamB.wins += 1;
+                teamB.history.push('W');
+                teamA.history.push('L');
             }
         }
+    }
+    // Final Buchholz Update (match Python lines 294-297)
+    if (useBuchholz) {
+        updateBuchholz(teams);
     }
 
     // Sort by score and buchholz
@@ -169,7 +278,7 @@ function runTournament(numTeams, numRounds, useBuchholz, winModel) {
 
 // Head-to-Head Simulation
 async function runHeadToHeadSimulation(params, progressCallback) {
-    const { numTeams, numRounds, historyA, historyB, minMatchups, useBuchholz, winModel } = params;
+    const { numTeams, numRounds, historyA, historyB, minMatchups, useBuchholz, winModel, maxSimulations } = params;
 
     let totalSims = 0;
     let matchupCount = 0;
@@ -179,7 +288,7 @@ async function runHeadToHeadSimulation(params, progressCallback) {
     const teamBRanks = [];
 
     const batchSize = 100;
-    const maxSims = 50000;
+    const maxSims = maxSimulations || 50000;
 
     while (totalSims < maxSims && matchupCount < minMatchups) {
         for (let i = 0; i < batchSize; i++) {

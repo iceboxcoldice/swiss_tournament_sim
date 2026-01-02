@@ -31,6 +31,27 @@ class Team:
     def __hash__(self):
         return hash(self.id)
 
+# Consistent LCG-based PRNG for Python/JS alignment
+_seed = 12345
+
+def set_seed(new_seed: int):
+    global _seed
+    _seed = new_seed
+
+def lcg_random() -> float:
+    global _seed
+    # Parameters for LCG (same as used in JS test)
+    _seed = (_seed * 1664525 + 1013904223) % 4294967296
+    return _seed / 4294967296
+
+def manual_shuffle(items: list):
+    """
+    Fisher-Yates shuffle using our LCG PRNG.
+    """
+    for i in range(len(items) - 1, 0, -1):
+        j = int(lcg_random() * (i + 1))
+        items[i], items[j] = items[j], items[i]
+
 def probability_of_win(team_a: Team, team_b: Team, model: str = 'elo') -> float:
     """
     Calculate probability of team_a winning against team_b.
@@ -65,7 +86,7 @@ def simulate_match(team_a: Team, team_b: Team, win_model: str = 'elo') -> Tuple[
     1.0 for win, 0.0 for loss, 0.5 for draw (optional, ignoring draws for now).
     """
     prob_a = probability_of_win(team_a, team_b, win_model)
-    if random.random() < prob_a:
+    if lcg_random() < prob_a:
         return 1.0, 0.0
     else:
         return 0.0, 1.0
@@ -143,7 +164,7 @@ def determine_sides(t1: Team, t2: Team, is_swappable: bool) -> Tuple[Team, Team]
     elif t2_pref > t1_pref:
         return t2, t1
     else:
-        if random.random() < 0.5:
+        if lcg_random() < 0.5:
             return t1, t2
         else:
             return t2, t1
@@ -172,20 +193,22 @@ def pair_round(teams: List[Team], round_num: int, use_buchholz: bool = False) ->
     if use_buchholz:
         update_buchholz(teams)
     
-    # Shuffle teams first to randomize order within score groups
-    random.shuffle(teams)
+    # Create a copy for pairing to avoid mutating original list order
+    # (Matches JS behavior where it shuffles a [...teams] copy)
+    teams_to_pair = list(teams)
+    manual_shuffle(teams_to_pair)
     
     
     # Group by score
     score_groups = defaultdict(list)
     if round_num > 1:
         # Rounds 2+: Group teams by their current scores
-        for t in teams:
+        for t in teams_to_pair:
             score_groups[t.score].append(t)
     else:
         # Rounds 0-1: Don't consider scores, treat all teams as one group for random pairing
         # Create new list with same team references (shallow copy) to avoid mutating original list
-        for t in teams:
+        for t in teams_to_pair:
             score_groups[0].append(t)
 
     sorted_scores = sorted(score_groups.keys(), reverse=True)
@@ -241,6 +264,8 @@ def pair_round(teams: List[Team], round_num: int, use_buchholz: bool = False) ->
             # Bye
             bye_team = floaters[0]
             bye_team.score += 1.0
+            bye_team.wins += 1
+            bye_team.history.append("W")
             bye_team.opponent_history.append(-1)
             # Bye usually doesn't count for sides, or counts as free Aff? 
             # Let's ignore side effect for bye in this sim
