@@ -1,5 +1,27 @@
 // ui.js - UI event handlers and display logic
 
+// Toggle Seed Card visibility
+document.getElementById('debug_mode').addEventListener('change', (e) => {
+    document.getElementById('seed_card').style.display = e.target.checked ? 'block' : 'none';
+});
+
+function getAndHandleSeed() {
+    const isDebug = document.getElementById('debug_mode').checked;
+    const seedInput = document.getElementById('global_seed');
+    let seed;
+
+    if (isDebug) {
+        seed = parseInt(seedInput.value) || 12345;
+    } else {
+        // Generate random seed
+        seed = Math.floor(Math.random() * 4294967296);
+        seedInput.value = seed; // Show what was picked
+    }
+
+    setSeed(seed);
+    return seed;
+}
+
 // Tab switching
 function switchTab(tabName) {
     // Hide all tab contents
@@ -22,6 +44,9 @@ function switchTab(tabName) {
 // Head-to-Head Form Handler
 document.getElementById('h2hForm').addEventListener('submit', async (e) => {
     e.preventDefault();
+
+    const seed = parseInt(document.getElementById('global_seed').value) || 12345;
+    setSeed(seed);
 
     const numTeams = parseInt(document.getElementById('h2h_teams').value);
     const historyA = document.getElementById('h2h_historyA').value.replace(/\s/g, '').toUpperCase();
@@ -92,6 +117,8 @@ function displayHeadToHeadResults(results, historyA, historyB) {
 document.getElementById('topNForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
+    getAndHandleSeed();
+
     const numTeams = parseInt(document.getElementById('topN_teams').value);
     const numRounds = parseInt(document.getElementById('topN_rounds').value);
     const topN = parseInt(document.getElementById('topN_n').value);
@@ -148,6 +175,8 @@ function displayTopNResults(results, topN) {
 // Win Distribution Form Handler
 document.getElementById('winDistForm').addEventListener('submit', async (e) => {
     e.preventDefault();
+
+    getAndHandleSeed();
 
     const numTeams = parseInt(document.getElementById('winDist_teams').value);
     const numRounds = parseInt(document.getElementById('winDist_rounds').value);
@@ -210,6 +239,8 @@ function displayWinDistResults(results, targetRank) {
 // Rank from Wins Form Handler
 document.getElementById('rankFromWinsForm').addEventListener('submit', async (e) => {
     e.preventDefault();
+
+    getAndHandleSeed();
 
     const numTeams = parseInt(document.getElementById('rankWins_teams').value);
     const numRounds = parseInt(document.getElementById('rankWins_rounds').value);
@@ -294,6 +325,8 @@ function displayRankFromWinsResults(results, targetWins) {
 // Rank from History Form Handler
 document.getElementById('rankHistoryForm').addEventListener('submit', async (e) => {
     e.preventDefault();
+
+    getAndHandleSeed();
 
     const numTeams = parseInt(document.getElementById('rankHistory_teams').value);
     const numRounds = parseInt(document.getElementById('rankHistory_rounds').value);
@@ -388,6 +421,8 @@ function displayRankFromHistoryResults(results, history) {
 // Top-N from History Form Handler
 document.getElementById('topNHistoryForm').addEventListener('submit', async (e) => {
     e.preventDefault();
+
+    getAndHandleSeed();
 
     const numTeams = parseInt(document.getElementById('topNHistory_teams').value);
     const numRounds = parseInt(document.getElementById('topNHistory_rounds').value);
