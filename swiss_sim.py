@@ -202,7 +202,7 @@ def pair_round(teams: List[Team], round_num: int, use_buchholz: bool = False) ->
     # Group by score
     score_groups = defaultdict(list)
     if round_num > 1:
-        # Rounds 2+: Group teams by their current scores
+        # Rounds 3+: Group teams by their current scores
         for t in teams_to_pair:
             score_groups[t.score].append(t)
     else:
