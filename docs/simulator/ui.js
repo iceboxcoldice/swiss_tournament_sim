@@ -45,8 +45,7 @@ function switchTab(tabName) {
 document.getElementById('h2hForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    const seed = parseInt(document.getElementById('global_seed').value) || 12345;
-    setSeed(seed);
+    getAndHandleSeed();
 
     const numTeams = parseInt(document.getElementById('h2h_teams').value);
     const historyA = document.getElementById('h2h_historyA').value.replace(/\s/g, '').toUpperCase();
@@ -90,7 +89,9 @@ document.getElementById('h2hForm').addEventListener('submit', async (e) => {
 });
 
 function displayHeadToHeadResults(results, historyA, historyB) {
-    const { totalSims, matchupCount, teamAWins, teamBWins, avgRankA, avgRankB } = results;
+    const { totalSims, matchupCount, teamAWins, teamBWins, avgRankA, avgRankB, seed } = results;
+
+    document.getElementById('h2h_seedDisplay').textContent = `Seed used: ${seed || document.getElementById('global_seed').value}`;
 
     if (matchupCount === 0) {
         alert('No matchups found. Try different histories or more simulations.');
@@ -117,7 +118,7 @@ function displayHeadToHeadResults(results, historyA, historyB) {
 document.getElementById('topNForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    getAndHandleSeed();
+    const seed = getAndHandleSeed();
 
     const numTeams = parseInt(document.getElementById('topN_teams').value);
     const numRounds = parseInt(document.getElementById('topN_rounds').value);
@@ -150,7 +151,8 @@ document.getElementById('topNForm').addEventListener('submit', async (e) => {
 });
 
 function displayTopNResults(results, topN) {
-    const { probabilities } = results;
+    const { probabilities, seed } = results;
+    document.getElementById('topN_seedDisplay').textContent = `Seed used: ${seed || document.getElementById('global_seed').value}`;
     const tbody = document.getElementById('topN_tableBody');
     tbody.innerHTML = '';
 
@@ -176,7 +178,7 @@ function displayTopNResults(results, topN) {
 document.getElementById('winDistForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    getAndHandleSeed();
+    const seed = getAndHandleSeed();
 
     const numTeams = parseInt(document.getElementById('winDist_teams').value);
     const numRounds = parseInt(document.getElementById('winDist_rounds').value);
@@ -209,7 +211,8 @@ document.getElementById('winDistForm').addEventListener('submit', async (e) => {
 });
 
 function displayWinDistResults(results, targetRank) {
-    const { winCounts, numSims } = results;
+    const { winCounts, numSims, seed } = results;
+    document.getElementById('winDist_seedDisplay').textContent = `Seed used: ${seed || document.getElementById('global_seed').value}`;
     const tbody = document.getElementById('winDist_tableBody');
     tbody.innerHTML = '';
 
@@ -240,7 +243,7 @@ function displayWinDistResults(results, targetRank) {
 document.getElementById('rankFromWinsForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    getAndHandleSeed();
+    const seed = getAndHandleSeed();
 
     const numTeams = parseInt(document.getElementById('rankWins_teams').value);
     const numRounds = parseInt(document.getElementById('rankWins_rounds').value);
@@ -273,7 +276,8 @@ document.getElementById('rankFromWinsForm').addEventListener('submit', async (e)
 });
 
 function displayRankFromWinsResults(results, targetWins) {
-    const { rankCounts, totalTeams } = results;
+    const { rankCounts, totalTeams, seed } = results;
+    document.getElementById('rankWins_seedDisplay').textContent = `Seed used: ${seed || document.getElementById('global_seed').value}`;
     const tbody = document.getElementById('rankWins_tableBody');
     tbody.innerHTML = '';
 
@@ -326,7 +330,7 @@ function displayRankFromWinsResults(results, targetWins) {
 document.getElementById('rankHistoryForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    getAndHandleSeed();
+    const seed = getAndHandleSeed();
 
     const numTeams = parseInt(document.getElementById('rankHistory_teams').value);
     const numRounds = parseInt(document.getElementById('rankHistory_rounds').value);
@@ -369,7 +373,8 @@ document.getElementById('rankHistoryForm').addEventListener('submit', async (e) 
 });
 
 function displayRankFromHistoryResults(results, history) {
-    const { rankCounts, totalTeams } = results;
+    const { rankCounts, totalTeams, seed } = results;
+    document.getElementById('rankHistory_seedDisplay').textContent = `Seed used: ${seed || document.getElementById('global_seed').value}`;
     const tbody = document.getElementById('rankHistory_tableBody');
     tbody.innerHTML = '';
 
@@ -422,7 +427,7 @@ function displayRankFromHistoryResults(results, history) {
 document.getElementById('topNHistoryForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    getAndHandleSeed();
+    const seed = getAndHandleSeed();
 
     const numTeams = parseInt(document.getElementById('topNHistory_teams').value);
     const numRounds = parseInt(document.getElementById('topNHistory_rounds').value);
@@ -471,7 +476,8 @@ document.getElementById('topNHistoryForm').addEventListener('submit', async (e) 
 });
 
 function displayTopNFromHistoryResults(results, history, topN) {
-    const { totalTeamsWithHistory, teamsInTopN, numSims } = results;
+    const { totalTeamsWithHistory, teamsInTopN, numSims, seed } = results;
+    document.getElementById('topNHistory_seedDisplay').textContent = `Seed used: ${seed || document.getElementById('global_seed').value}`;
 
     document.getElementById('topNHistory_subtitle').textContent = `For teams with history "${history}"`;
 
