@@ -23,6 +23,36 @@ const tabContent = document.getElementById('tabContent');
 let activeTab = null;
 let navigationHistory = []; // Track navigation history for back button
 
+// Loading Spinner Utilities
+function showLoading(message = 'Syncing with cloud...') {
+    const overlay = document.getElementById('loadingOverlay');
+    const msgElement = document.getElementById('loadingMessage');
+    if (overlay && msgElement) {
+        msgElement.innerText = message;
+        overlay.classList.remove('hidden');
+    }
+}
+
+function hideLoading() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) {
+        overlay.classList.add('hidden');
+    }
+}
+
+function setButtonsLoading(selector, loading) {
+    const buttons = document.querySelectorAll(selector);
+    buttons.forEach(btn => {
+        if (loading) {
+            btn.classList.add('btn-loading');
+            btn.disabled = true;
+        } else {
+            btn.classList.remove('btn-loading');
+            btn.disabled = false;
+        }
+    });
+}
+
 // Helper: Get elimination round label
 function getElimRoundLabel(elimRoundNum, totalElimRounds) {
     const roundsFromEnd = totalElimRounds - elimRoundNum + 1;
@@ -173,7 +203,7 @@ if (saveBackendBtn) {
     saveBackendBtn.addEventListener('click', async () => {
         const url = backendUrlInput.value.trim();
         if (url) {
-            // Test connection
+            showLoading('Connecting to backend...');
             try {
                 const response = await fetch(`${url}/api/health`);
                 if (response.ok) {
@@ -192,6 +222,8 @@ if (saveBackendBtn) {
                 }
             } catch (e) {
                 showNotification('Error', 'Failed to connect to backend. ' + e.message);
+            } finally {
+                hideLoading();
             }
         } else {
             // Clear backend
@@ -268,9 +300,16 @@ resetBtn.addEventListener('click', () => {
     showConfirm(
         'Reset Tournament',
         'Are you sure you want to reset the tournament? This cannot be undone.',
-        () => {
-            tournament.clearStorage();
-            location.reload();
+        async () => {
+            showLoading('Resetting tournament...');
+            try {
+                await tournament.clearStorage();
+                location.reload();
+            } catch (e) {
+                showNotification('Error', 'Failed to reset tournament: ' + e.message);
+            } finally {
+                hideLoading();
+            }
         }
     );
 });
@@ -482,6 +521,7 @@ async function handleNewRound() {
         }
     }
 
+    showLoading('Pairing round...');
     try {
         await tournament.pairRound(nextRound);
         // Refresh UI tabs and then focus on the newly created round
@@ -489,6 +529,8 @@ async function handleNewRound() {
         showRound(nextRound);
     } catch (error) {
         showNotification('Error', error.message);
+    } finally {
+        hideLoading();
     }
 }
 
@@ -1151,11 +1193,14 @@ window.updateParticipantStandings = function () {
 
 // Report Result
 window.reportResult = async function (matchId, outcome) {
+    showLoading('Reporting result...');
     try {
         await tournament.reportResult(matchId, outcome);
         updateDashboard();
     } catch (error) {
         showNotification('Error', error.message);
+    } finally {
+        hideLoading();
     }
 };
 
@@ -1205,6 +1250,7 @@ window.submitSpeakerPoint = async function (matchId, index) {
     if (index === 'neg_0') newSP.negPoints[0] = value;
     if (index === 'neg_1') newSP.negPoints[1] = value;
 
+    showLoading('Updating speaker points...');
     try {
         await tournament.updateResult(parseInt(matchId), match.result, newSP);
         // Refresh view
@@ -1212,6 +1258,8 @@ window.submitSpeakerPoint = async function (matchId, index) {
         showRound(activeRound);
     } catch (error) {
         showNotification('Error', error.message);
+    } finally {
+        hideLoading();
     }
 };
 
@@ -1235,6 +1283,7 @@ window.correctResult = function (matchId, currentResult) {
         'Switch Winner',
         'Are you sure you want to switch the winner? This will update standings but preserve existing pairings.',
         async () => { // Made callback async
+            showLoading('Updating winner...');
             try {
                 await tournament.updateResult(matchId, newOutcome); // Added await
                 // Refresh view
@@ -1242,6 +1291,8 @@ window.correctResult = function (matchId, currentResult) {
                 showRound(activeRound); // Changed updateDashboard to showRound
             } catch (error) {
                 showNotification('Error', error.message);
+            } finally {
+                hideLoading();
             }
         }
     );
@@ -1253,11 +1304,14 @@ window.unsubmitResult = function (matchId) {
         'Unsubmit Result',
         'Are you sure you want to remove this result? This will update standings but preserve existing pairings.',
         async () => {
+            showLoading('Removing result...');
             try {
                 await tournament.updateResult(matchId, null);
                 updateDashboard();
             } catch (error) {
                 showNotification('Error', error.message);
+            } finally {
+                hideLoading();
             }
         }
     );
@@ -1537,6 +1591,7 @@ async function submitAddJudge(event) {
     const name = document.getElementById('judgeName').value.trim();
     const institution = document.getElementById('judgeInstitution').value.trim();
 
+    showLoading('Adding judge...');
     try {
         await tournament.addJudge(name, institution);
         hideAddJudgeForm(); // Hide form after successful add
@@ -1544,10 +1599,12 @@ async function submitAddJudge(event) {
         showNotification('Success', `Judge "${name}" added successfully!`);
     } catch (error) {
         showNotification('Error', error.message);
+    } finally {
+        hideLoading();
     }
 }
 
-function deleteJudge(judgeId) {
+window.deleteJudge = function (judgeId) {
     const judge = tournament.judges.find(j => j.id === judgeId);
     if (!judge) return;
 
@@ -1555,16 +1612,19 @@ function deleteJudge(judgeId) {
         'Delete Judge',
         `Are you sure you want to delete judge "${judge.name}"?`,
         async () => {
+            showLoading('Deleting judge...');
             try {
                 await tournament.removeJudge(judgeId);
                 showJudges(); // Refresh the view
                 showNotification('Success', `Judge "${judge.name}" deleted successfully!`);
             } catch (error) {
                 showNotification('Error', error.message);
+            } finally {
+                hideLoading();
             }
         }
     );
-}
+};
 
 
 
@@ -1579,6 +1639,7 @@ async function assignJudge(matchId) {
         return;
     }
 
+    showLoading('Assigning judge...');
     try {
         await tournament.assignJudgeToMatch(matchId, judgeId);
         // Refresh the current round view
@@ -1590,10 +1651,13 @@ async function assignJudge(matchId) {
         showNotification('Success', `Judge "${judge.name}" assigned to Match ${matchId}`);
     } catch (error) {
         showNotification('Error', error.message);
+    } finally {
+        hideLoading();
     }
 }
 
 async function unassignJudge(matchId) {
+    showLoading('Unassigning judge...');
     try {
         await tournament.unassignJudgeFromMatch(matchId);
         // Refresh the current round view
@@ -1604,6 +1668,8 @@ async function unassignJudge(matchId) {
         showNotification('Success', `Judge unassigned from Match ${matchId}`);
     } catch (error) {
         showNotification('Error', error.message);
+    } finally {
+        hideLoading();
     }
 }
 

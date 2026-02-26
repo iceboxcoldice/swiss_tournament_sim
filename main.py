@@ -369,5 +369,24 @@ def report_result():
         logger.error(f"Error in report: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/reset', methods=['POST'])
+def reset_tournament():
+    """Clear tournament data from GCS."""
+    try:
+        client = get_storage_client()
+        bucket = client.bucket(BUCKET_NAME)
+        blob = bucket.blob(TOURNAMENT_BLOB_NAME)
+        
+        if blob.exists():
+            blob.delete()
+            logger.info("Tournament data deleted from GCS")
+            return jsonify({"message": "Tournament data cleared"}), 200
+        else:
+            return jsonify({"message": "No tournament data found to clear"}), 200
+            
+    except Exception as e:
+        logger.error(f"Error in reset: {e}")
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))

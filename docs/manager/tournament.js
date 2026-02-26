@@ -1247,6 +1247,16 @@ class TournamentManager {
 
     // Clear all storage
     async clearStorage() {
+        if (this.backendUrl) {
+            try {
+                await fetch(`${this.backendUrl}/api/reset`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } catch (e) {
+                console.error("Failed to clear cloud storage:", e);
+            }
+        }
         localStorage.removeItem('tournamentData');
         localStorage.removeItem('backendUrl');
         this.data = null;
