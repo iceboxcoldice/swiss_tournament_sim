@@ -1,0 +1,8 @@
+Harvard Debate Team
+Yale Debate Team
+Princeton Debate Team
+Stanford Debate Team
+MIT Debate Team
+Columbia Debate Team
+UChicago Debate Team
+Berkeley Debate Team

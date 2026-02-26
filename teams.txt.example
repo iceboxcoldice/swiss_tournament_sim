@@ -1,0 +1,16 @@
+# Team Names File Format
+# Format: TeamID, Team Name, Institution, Member1, Member2, ...
+# 
+# TeamID should match the team's ID (0-indexed or as needed)
+# Institution is optional but recommended
+# Members are optional
+#
+# Example entries:
+
+0, Harvard A, Harvard University, Alice Johnson, Bob Smith
+1, Yale A, Yale University, Carol Davis, David Lee
+2, Stanford A, Stanford University, Emma Wilson, Frank Chen
+3, MIT A, Massachusetts Institute of Technology, Grace Taylor, Henry Martinez
+4, Princeton A, Princeton University, Iris Anderson, Jack Robinson
+5, Columbia A, Columbia University, Kelly White, Leo Harris
+

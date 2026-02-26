@@ -342,8 +342,8 @@ def report_result():
         judge_id = req_data.get('judge_id')
         speaker_points = req_data.get('speaker_points') # Optional dict
         
-        if not match_id or not result:
-            return jsonify({"error": "Missing match_id or result"}), 400
+        if not match_id:
+            return jsonify({"error": "Missing match_id"}), 400
             
         data, teams = tm.load_tournament()
         if not data:

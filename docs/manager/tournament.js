@@ -125,17 +125,20 @@ class TournamentManager {
     async saveToStorage() {
         if (!this.data) return;
 
+        // Update this.data.teams from this.teams to ensure stats (like speaker points history) are persisted
+        this.data.teams = this.teams.map(t => {
+            // Create a plain object for storage
+            const plain = { ...t };
+            return plain;
+        });
+
+        // Reconstruct judges in data if necessary
+        if (this.judges.length > 0) {
+            this.data.judges = this.judges.map(j => ({ id: j.id, name: j.name, institution: j.institution }));
+        }
+
         // Always save local backup
         localStorage.setItem('tournamentData', JSON.stringify(this.data));
-
-        // If Cloud Mode, sync to backend
-        // Note: This is tricky because backend expects specific API calls (init, pair, report)
-        // rather than a full state dump.
-        // Ideally, we should refactor frontend to call API endpoints instead of manipulating state directly.
-        // But for this migration, we might need a "sync" endpoint or just rely on the specific actions.
-
-        // However, since we are modifying the actions (init, pair, report) to call API,
-        // we might not need a generic saveToStorage for cloud.
     }
 
     reconstructObjects() {
@@ -877,7 +880,7 @@ class TournamentManager {
 
             if (pointsToLog) {
                 if (speakerPoints) {
-                    this.storeSpeakerPoints(matchId, speakerPoints);
+                    this.storeSpeakerPoints(matchId, speakerPoints, true); // true = skipSync
                 }
                 const sp = pointsToLog;
                 const a1 = sp.affPoints[0] !== null ? sp.affPoints[0] : "null";
@@ -903,7 +906,7 @@ class TournamentManager {
                     body: JSON.stringify({
                         match_id: matchId,
                         result: newOutcome,
-                        speaker_points: speakerPoints
+                        speaker_points: speakerPoints || match.speaker_points
                     })
                 });
 
@@ -929,6 +932,7 @@ class TournamentManager {
             team.neg_count = 0;
             team.last_side = null;
             team.side_history = {};
+            team.speaker_points_history = []; // Rebuild from matches
         }
 
         // Calculate from matches
@@ -938,6 +942,21 @@ class TournamentManager {
         for (const match of sortedMatches) {
             const affTeam = this.teams.find(t => t.id === match.aff_id);
             const negTeam = this.teams.find(t => t.id === match.neg_id);
+
+            if (!affTeam || !negTeam) continue;
+
+            // Rebuild speaker points history
+            if (match.speaker_points) {
+                const sp = match.speaker_points;
+                affTeam.speaker_points_history.push({
+                    round: match.round_num,
+                    points: sp.affPoints
+                });
+                negTeam.speaker_points_history.push({
+                    round: match.round_num,
+                    points: sp.negPoints
+                });
+            }
 
             affTeam.aff_count++;
             negTeam.neg_count++;
@@ -1060,7 +1079,8 @@ class TournamentManager {
 
     // Store speaker points for a match
     // speakerPoints: {affPoints: [number, number], negPoints: [number, number]}
-    storeSpeakerPoints(matchId, speakerPoints) {
+    // skipSync: if true, don't call updateResult (used when called from updateResult)
+    storeSpeakerPoints(matchId, speakerPoints, skipSync = false) {
         const match = this.data.matches.find(m => m.match_id === matchId);
         if (!match) {
             throw new Error(`Match ${matchId} not found`);
@@ -1081,29 +1101,57 @@ class TournamentManager {
         const affTeam = this.teams.find(t => t.id === match.aff_id);
         const negTeam = this.teams.find(t => t.id === match.neg_id);
 
-        // Remove existing entry for this round if it exists
-        affTeam.speaker_points_history = affTeam.speaker_points_history.filter(
-            entry => entry.round !== match.round_num
-        );
-        negTeam.speaker_points_history = negTeam.speaker_points_history.filter(
-            entry => entry.round !== match.round_num
-        );
+        if (affTeam && negTeam) {
+            // Remove existing entry for this round if it exists
+            affTeam.speaker_points_history = affTeam.speaker_points_history.filter(
+                entry => entry.round !== match.round_num
+            );
+            negTeam.speaker_points_history = negTeam.speaker_points_history.filter(
+                entry => entry.round !== match.round_num
+            );
 
-        // Add new entry
-        affTeam.speaker_points_history.push({
-            round: match.round_num,
-            points: speakerPoints.affPoints
-        });
-        negTeam.speaker_points_history.push({
-            round: match.round_num,
-            points: speakerPoints.negPoints
-        });
+            // Add new entry
+            affTeam.speaker_points_history.push({
+                round: match.round_num,
+                points: speakerPoints.affPoints
+            });
+            negTeam.speaker_points_history.push({
+                round: match.round_num,
+                points: speakerPoints.negPoints
+            });
+        }
+
+        if (skipSync) {
+            this.recalculateStats();
+            this.saveToStorage();
+            return;
+        }
 
         // If match already has a result, update the result file to include new points
         if (match.result !== null) {
             this.updateResult(matchId, match.result);
         } else {
+            this.recalculateStats();
             this.saveToStorage();
+
+            // Enqueue Sync for speaker points even if no winner yet
+            if (this.backendUrl) {
+                this.enqueueSync(async () => {
+                    const response = await fetch(`${this.backendUrl}/api/report`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            match_id: matchId,
+                            result: match.result,
+                            speaker_points: speakerPoints
+                        })
+                    });
+                    if (!response.ok) {
+                        const err = await response.json();
+                        throw new Error(err.error || 'Backend speaker points sync failed');
+                    }
+                });
+            }
         }
     }
 

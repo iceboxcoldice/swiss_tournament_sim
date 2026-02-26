@@ -1,0 +1,13 @@
+# Judges File Format
+# Format: JudgeID, Name, Institution
+# 
+# JudgeID should be a unique positive integer
+# Use -1 in results files to indicate no judge assigned
+#
+# Example entries:
+
+101, Judge Sarah Smith, Harvard University
+102, Judge Michael Jones, Yale University
+103, Judge Emily Brown, Stanford University
+104, Judge David Wilson, MIT
+105, Judge Lisa Chen, Princeton University
