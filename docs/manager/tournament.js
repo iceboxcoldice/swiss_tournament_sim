@@ -40,7 +40,7 @@ class TournamentManager {
         this.teams = [];
         this.judges = [];
         this.backendUrl = null;
-        this.loadFromStorage();
+        this.ready = this.loadFromStorage();
     }
 
     setBackendUrl(url) {
@@ -57,7 +57,7 @@ class TournamentManager {
         if (this.backendUrl) {
             // Cloud Mode
             try {
-                const response = await fetch(`${this.backendUrl}/api/data`, { cache: 'no-store' });
+                const response = await fetch(`${this.backendUrl}/api/data?_=${Date.now()}`, { cache: 'no-store' });
                 if (response.ok) {
                     const data = await response.json();
                     this.data = data;
@@ -132,7 +132,7 @@ class TournamentManager {
                     console.log('Backend init successful:', result);
 
                     // Reload full data from backend
-                    const dataResponse = await fetch(`${this.backendUrl}/api/data`, { cache: 'no-store' });
+                    const dataResponse = await fetch(`${this.backendUrl}/api/data?_=${Date.now()}`, { cache: 'no-store' });
                     if (dataResponse.ok) {
                         const data = await dataResponse.json();
                         console.log('Fetched data from backend:', data);
@@ -202,7 +202,17 @@ class TournamentManager {
 
                 if (response.ok) {
                     const result = await response.json();
-                    await this.loadFromStorage();
+                    // Directly merge new matches into local data instead of re-fetching
+                    // (re-fetching /api/data can return stale cached response)
+                    if (result.matches && this.data) {
+                        this.data.matches = this.data.matches.concat(result.matches);
+                        this.data.current_round = roundNum;
+                        if (!this.data.rounds) this.data.rounds = [];
+                        this.data.rounds.push(result.matches.map(m => m.match_id));
+                        console.log('Merged pair result. matches now:', this.data.matches.length);
+                    }
+                    // Also do a background full sync (non-blocking)
+                    this.loadFromStorage().catch(e => console.warn('Background sync failed:', e));
                     return result.matches;
                 } else {
                     const err = await response.json();
@@ -266,7 +276,7 @@ class TournamentManager {
     }
 
     // Add a new judge
-    addJudge(name, institution = '') {
+    async addJudge(name, institution = '') {
         if (!name || name.trim() === '') {
             throw new Error('Judge name is required');
         }
@@ -276,6 +286,32 @@ class TournamentManager {
             throw new Error(`Judge with name "${name}" already exists`);
         }
 
+        if (this.backendUrl) {
+            try {
+                const response = await fetch(`${this.backendUrl}/api/judge`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name.trim(), institution: institution.trim() })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    const j = result.judge;
+                    const judge = new Judge(j.id, j.name, j.institution);
+                    this.judges.push(judge);
+                    this.saveToStorage();
+                    return judge;
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Backend judge addition failed');
+                }
+            } catch (e) {
+                console.error("Cloud judge addition failed:", e);
+                alert("Failed to add judge on cloud: " + e.message);
+                throw e;
+            }
+        }
+
         const judge = new Judge(this.data.next_judge_id++, name.trim(), institution.trim());
         this.judges.push(judge);
         this.saveToStorage();
@@ -283,7 +319,7 @@ class TournamentManager {
     }
 
     // Remove a judge
-    removeJudge(judgeId) {
+    async removeJudge(judgeId) {
         const judge = this.judges.find(j => j.id === judgeId);
         if (!judge) {
             throw new Error(`Judge ${judgeId} not found`);
@@ -294,12 +330,31 @@ class TournamentManager {
             throw new Error(`Cannot remove judge "${judge.name}" - they are assigned to ${judge.matches_judged.length} match(es)`);
         }
 
+        if (this.backendUrl) {
+            try {
+                const response = await fetch(`${this.backendUrl}/api/judge`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ judge_id: judgeId })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Backend judge removal failed');
+                }
+            } catch (e) {
+                console.error("Cloud judge removal failed:", e);
+                alert("Failed to remove judge on cloud: " + e.message);
+                throw e;
+            }
+        }
+
         this.judges = this.judges.filter(j => j.id !== judgeId);
         this.saveToStorage();
     }
 
     // Assign a judge to a match
-    assignJudgeToMatch(matchId, judgeId) {
+    async assignJudgeToMatch(matchId, judgeId) {
         const match = this.data.matches.find(m => m.match_id === matchId);
         if (!match) {
             throw new Error(`Match ${matchId} not found`);
@@ -310,9 +365,32 @@ class TournamentManager {
             throw new Error(`Judge ${judgeId} not found`);
         }
 
-        // If match already has a judge, unassign them first
+        if (this.backendUrl) {
+            try {
+                const response = await fetch(`${this.backendUrl}/api/assign_judge`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ match_id: matchId, judge_id: judgeId })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Backend judge assignment failed');
+                }
+                await this.loadFromStorage(); // Reload data from backend after successful assignment
+            } catch (e) {
+                console.error("Cloud judge assignment failed:", e);
+                alert("Failed to assign judge on cloud: " + e.message);
+                throw e;
+            }
+        }
+
+        // If match already has a judge, unassign them first locally
         if (match.judge_id !== null) {
-            this.unassignJudgeFromMatch(matchId);
+            const oldJudge = this.judges.find(j => j.id === match.judge_id);
+            if (oldJudge) {
+                oldJudge.matches_judged = oldJudge.matches_judged.filter(mid => mid !== matchId);
+            }
         }
 
         // Assign the new judge
@@ -325,13 +403,33 @@ class TournamentManager {
     }
 
     // Unassign a judge from a match
-    unassignJudgeFromMatch(matchId) {
+    async unassignJudgeFromMatch(matchId) {
         const match = this.data.matches.find(m => m.match_id === matchId);
         if (!match) {
             throw new Error(`Match ${matchId} not found`);
         }
 
         if (match.judge_id !== null) {
+            if (this.backendUrl) {
+                try {
+                    const response = await fetch(`${this.backendUrl}/api/assign_judge`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ match_id: matchId, judge_id: null })
+                    });
+
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.error || 'Backend judge unassignment failed');
+                    }
+                    await this.loadFromStorage(); // Reload data from backend after successful unassignment
+                } catch (e) {
+                    console.error("Cloud judge unassignment failed:", e);
+                    alert("Failed to unassign judge on cloud: " + e.message);
+                    throw e;
+                }
+            }
+
             const judge = this.judges.find(j => j.id === match.judge_id);
             if (judge) {
                 judge.matches_judged = judge.matches_judged.filter(mid => mid !== matchId);
@@ -1147,41 +1245,14 @@ class TournamentManager {
         this.saveToStorage();
     }
 
-    // LocalStorage persistence
-    saveToStorage() {
-        this.checkConsistency();
-        const data = this.exportData();
-        localStorage.setItem('tournament_data', JSON.stringify(data));
-    }
-
-    // Check consistency between JSON data and redundant file content
-    checkConsistency() {
-        if (this.data) {
-            // Ensure fields exist
-            if (!this.data.pairing_file_content) this.data.pairing_file_content = this.generatePairingFileContent();
-            if (!this.data.result_file_content) this.data.result_file_content = this.generateResultFileContent();
-
-            this.validatePairingRedundancy(this.data.matches, this.data.pairing_file_content);
-            this.validateResultRedundancy(this.data.matches, this.data.result_file_content);
-        }
-    }
-
-    loadFromStorage() {
-        const stored = localStorage.getItem('tournament_data');
-        if (stored) {
-            try {
-                const data = JSON.parse(stored);
-                this.importData(data);
-            } catch (e) {
-                console.error('Failed to load tournament data:', e);
-            }
-        }
-    }
-
-    clearStorage() {
-        localStorage.removeItem('tournament_data');
+    // Clear all storage
+    async clearStorage() {
+        localStorage.removeItem('tournamentData');
+        localStorage.removeItem('backendUrl');
         this.data = null;
         this.teams = [];
+        this.judges = [];
+        this.backendUrl = null;
     }
 
     // Generate pairing file content

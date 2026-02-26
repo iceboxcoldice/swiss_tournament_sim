@@ -102,16 +102,30 @@ def init_tournament():
         if not num_teams or not rounds:
             return jsonify({"error": "Missing num_teams or rounds"}), 400
             
+        req_teams = req_data.get('teams', [])
+        
         # Create initial data structure
         teams = []
         for i in range(num_teams):
-            teams.append(swiss_sim.Team(id=i, true_rank=0, name=f"Team {i+1}"))
+            name = f"Team {i+1}"
+            institution = "Unknown"
+            members = []
+            if i < len(req_teams):
+                req_t = req_teams[i]
+                name = req_t.get('name', name)
+                institution = req_t.get('institution', institution)
+                members = req_t.get('members', [])
+            
+            t_obj = swiss_sim.Team(id=i, true_rank=0, name=name, members=members)
+            t_obj.institution = institution
+            teams.append(t_obj)
             
         data = {
             "config": {
                 "num_teams": num_teams,
-                "num_rounds": rounds,
+                "num_prelim_rounds": rounds,
                 "num_elim_rounds": elim_rounds,
+                "num_rounds": rounds + elim_rounds,
             },
             "current_round": 0,
             "rounds": [],
@@ -134,9 +148,114 @@ def get_data():
     """Get full tournament data (for syncing)."""
     data = load_tournament_from_gcs()
     if data:
-        return jsonify(data), 200
+        response = jsonify(data)
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        return response, 200
     else:
         return jsonify({"error": "No tournament found"}), 404
+
+@app.route('/api/judge', methods=['POST', 'DELETE'])
+def manage_judge():
+    """Add or remove a judge."""
+    try:
+        data, teams = tm.load_tournament()
+        if not data:
+             return jsonify({"error": "No tournament found"}), 404
+             
+        if 'judges' not in data:
+            data['judges'] = []
+
+        if request.method == 'POST':
+            req_data = request.json
+            name = req_data.get('name')
+            institution = req_data.get('institution', 'Tournament Hire')
+            
+            if not name:
+                return jsonify({"error": "Missing judge name"}), 400
+                
+            judge_id = data.get('next_judge_id', 1)
+            new_judge = {
+                "id": judge_id,
+                "name": name,
+                "institution": institution,
+                "matches_judged": []
+            }
+            data['judges'].append(new_judge)
+            data['next_judge_id'] = judge_id + 1
+            
+            if tm.save_tournament(data, teams):
+                return jsonify({"message": "Judge added", "judge": new_judge}), 200
+            else:
+                return jsonify({"error": "Failed to save judge"}), 500
+                
+        elif request.method == 'DELETE':
+            judge_id = request.json.get('judge_id')
+            if judge_id is None:
+                return jsonify({"error": "Missing judge_id"}), 400
+                
+            # Note: The frontend checks if judge is assigned before calling DELETE.
+            # We trust the frontend or we can add validation here.
+            data['judges'] = [j for j in data['judges'] if j.get('id') != judge_id]
+            
+            if tm.save_tournament(data, teams):
+                return jsonify({"message": f"Judge {judge_id} removed"}), 200
+            else:
+                return jsonify({"error": "Failed to save judge removal"}), 500
+
+    except Exception as e:
+        logger.error(f"Error managing judge: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/assign_judge', methods=['POST'])
+def assign_judge():
+    """Assign or unassign a judge from a match."""
+    try:
+        req_data = request.json
+        match_id = req_data.get('match_id')
+        judge_id = req_data.get('judge_id')
+        
+        if match_id is None:
+            return jsonify({"error": "Missing match_id"}), 400
+            
+        data, teams = tm.load_tournament()
+        if not data:
+             return jsonify({"error": "No tournament found"}), 404
+             
+        match = next((m for m in data['matches'] if m['match_id'] == match_id), None)
+        if not match:
+            return jsonify({"error": f"Match {match_id} not found"}), 404
+            
+        old_judge_id = match.get('judge_id')
+        
+        # Determine if we are unassigning (null/-1 input) or assigning
+        new_judge_id = judge_id if judge_id is not None and judge_id != -1 else None
+
+        # Unassign old judge logic
+        if old_judge_id is not None:
+            old_judge = next((j for j in data.get('judges', []) if j.get('id') == old_judge_id), None)
+            if old_judge and match_id in old_judge.get('matches_judged', []):
+                old_judge.setdefault('matches_judged', []).remove(match_id)
+                
+        # Assign new judge logic
+        if new_judge_id is not None:
+            new_judge = next((j for j in data.get('judges', []) if j.get('id') == new_judge_id), None)
+            if not new_judge:
+                return jsonify({"error": f"Judge {new_judge_id} not found"}), 404
+            if match_id not in new_judge.setdefault('matches_judged', []):
+                new_judge['matches_judged'].append(match_id)
+                
+        match['judge_id'] = new_judge_id
+
+        if tm.save_tournament(data, teams):
+            return jsonify({"message": f"Judge assignment updated for match {match_id}"}), 200
+        else:
+            return jsonify({"error": "Failed to save judge assignment"}), 500
+            
+    except Exception as e:
+        logger.error(f"Error assigning judge: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/pair', methods=['POST'])
 def pair_round():

@@ -184,7 +184,8 @@ if (saveBackendBtn) {
                     showNotification('Connected', 'Successfully connected to backend.');
 
                     // Sync data?
-                    // For now, just refresh UI if we switch to cloud
+                    // Fetch latest data from cloud instead of relying on stale local data
+                    await tournament.loadFromStorage();
                     initUI();
                 } else {
                     showNotification('Error', 'Failed to connect to backend. Check URL.');
@@ -1149,9 +1150,9 @@ window.updateParticipantStandings = function () {
 };
 
 // Report Result
-window.reportResult = function (matchId, outcome) {
+window.reportResult = async function (matchId, outcome) {
     try {
-        tournament.reportResult(matchId, outcome);
+        await tournament.reportResult(matchId, outcome);
         updateDashboard();
     } catch (error) {
         showNotification('Error', error.message);
@@ -1251,9 +1252,9 @@ window.unsubmitResult = function (matchId) {
     showConfirm(
         'Unsubmit Result',
         'Are you sure you want to remove this result? This will update standings but preserve existing pairings.',
-        () => {
+        async () => {
             try {
-                tournament.updateResult(matchId, null);
+                await tournament.updateResult(matchId, null);
                 updateDashboard();
             } catch (error) {
                 showNotification('Error', error.message);
@@ -1530,14 +1531,14 @@ window.hideAddJudgeForm = function () {
     }
 };
 
-function submitAddJudge(event) {
+async function submitAddJudge(event) {
     event.preventDefault();
 
     const name = document.getElementById('judgeName').value.trim();
     const institution = document.getElementById('judgeInstitution').value.trim();
 
     try {
-        tournament.addJudge(name, institution);
+        await tournament.addJudge(name, institution);
         hideAddJudgeForm(); // Hide form after successful add
         showJudges(); // Refresh the view
         showNotification('Success', `Judge "${name}" added successfully!`);
@@ -1553,9 +1554,9 @@ function deleteJudge(judgeId) {
     showConfirm(
         'Delete Judge',
         `Are you sure you want to delete judge "${judge.name}"?`,
-        () => {
+        async () => {
             try {
-                tournament.removeJudge(judgeId);
+                await tournament.removeJudge(judgeId);
                 showJudges(); // Refresh the view
                 showNotification('Success', `Judge "${judge.name}" deleted successfully!`);
             } catch (error) {
@@ -1568,7 +1569,7 @@ function deleteJudge(judgeId) {
 
 
 // Judge Assignment Functions
-function assignJudge(matchId) {
+async function assignJudge(matchId) {
     const selectElement = document.getElementById(`judge_select_${matchId}`);
     if (!selectElement) return;
 
@@ -1579,7 +1580,7 @@ function assignJudge(matchId) {
     }
 
     try {
-        tournament.assignJudgeToMatch(matchId, judgeId);
+        await tournament.assignJudgeToMatch(matchId, judgeId);
         // Refresh the current round view
         const match = tournament.data.matches.find(m => m.match_id === matchId);
         if (match) {
@@ -1592,9 +1593,9 @@ function assignJudge(matchId) {
     }
 }
 
-function unassignJudge(matchId) {
+async function unassignJudge(matchId) {
     try {
-        tournament.unassignJudgeFromMatch(matchId);
+        await tournament.unassignJudgeFromMatch(matchId);
         // Refresh the current round view
         const match = tournament.data.matches.find(m => m.match_id === matchId);
         if (match) {
@@ -1606,9 +1607,9 @@ function unassignJudge(matchId) {
     }
 }
 
-function changeJudgeAssignment(matchId) {
+async function changeJudgeAssignment(matchId) {
     // Unassign current judge and refresh to show dropdown
-    unassignJudge(matchId);
+    await unassignJudge(matchId);
 };
 
 // Handle browser back/forward navigation
@@ -1619,7 +1620,14 @@ window.addEventListener('hashchange', () => {
 });
 
 // Initialize on load
-initUI();
+(async () => {
+    try {
+        await tournament.loadFromStorage();
+    } catch (e) {
+        console.error('Initial load failed:', e);
+    }
+    initUI();
+})();
 
 
 // Judge Management Functions (moved outside showTeamDetails)
@@ -1641,14 +1649,14 @@ window.hideAddJudgeForm = function () {
     }
 };
 
-window.submitAddJudge = function (event) {
+window.submitAddJudge = async function (event) {
     event.preventDefault();
 
     const name = document.getElementById('judgeName').value.trim();
     const institution = document.getElementById('judgeInstitution').value.trim();
 
     try {
-        tournament.addJudge(name, institution);
+        await tournament.addJudge(name, institution);
         hideAddJudgeForm(); // Hide form after successful add
         showJudges(); // Refresh the view
         showNotification('Success', `Judge "${name}" added successfully!`);
@@ -1664,9 +1672,9 @@ window.deleteJudge = function (judgeId) {
     showConfirm(
         'Delete Judge',
         `Are you sure you want to delete judge "${judge.name}"?`,
-        () => {
+        async () => {
             try {
-                tournament.removeJudge(judgeId);
+                await tournament.removeJudge(judgeId);
                 showJudges(); // Refresh the view
                 showNotification('Success', `Judge "${judge.name}" deleted successfully!`);
             } catch (error) {
@@ -1770,7 +1778,7 @@ window.showJudgeDetails = function (judgeId) {
 
 
 
-window.assignJudge = function (matchId) {
+window.assignJudge = async function (matchId) {
     const selectElement = document.getElementById(`judge_select_${matchId}`);
     if (!selectElement) return;
 
@@ -1781,7 +1789,7 @@ window.assignJudge = function (matchId) {
     }
 
     try {
-        tournament.assignJudgeToMatch(matchId, judgeId);
+        await tournament.assignJudgeToMatch(matchId, judgeId);
         // Refresh the current round view
         const match = tournament.data.matches.find(m => m.match_id === matchId);
         if (match) {
@@ -1794,9 +1802,9 @@ window.assignJudge = function (matchId) {
     }
 };
 
-window.unassignJudge = function (matchId) {
+window.unassignJudge = async function (matchId) {
     try {
-        tournament.unassignJudgeFromMatch(matchId);
+        await tournament.unassignJudgeFromMatch(matchId);
         // Refresh the current round view
         const match = tournament.data.matches.find(m => m.match_id === matchId);
         if (match) {
