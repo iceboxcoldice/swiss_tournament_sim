@@ -41,6 +41,49 @@ class TournamentManager {
         this.judges = [];
         this.backendUrl = null;
         this.ready = this.loadFromStorage();
+
+        // Optimistic Sync System
+        this.syncQueue = [];
+        this.isSyncing = false;
+        this.onSyncStatusChange = null;
+    }
+
+    // Add task to sync queue
+    enqueueSync(task) {
+        this.syncQueue.push(task);
+        this.processSyncQueue();
+    }
+
+    // Process the sync queue in background
+    async processSyncQueue() {
+        if (this.isSyncing || this.syncQueue.length === 0) return;
+
+        this.isSyncing = true;
+        if (this.onSyncStatusChange) this.onSyncStatusChange(true);
+
+        while (this.syncQueue.length > 0) {
+            const task = this.syncQueue[0];
+            try {
+                await task();
+                this.syncQueue.shift(); // Remove only on success
+            } catch (error) {
+                console.error("Sync task failed:", error);
+                // For now, we'll keep it in queue and retry later, 
+                // or eventually bail if we want to prevent infinite loops.
+                // A better implementation would have retry logic or rollback.
+                break;
+            }
+        }
+
+        this.isSyncing = false;
+        if (this.onSyncStatusChange) this.onSyncStatusChange(false);
+
+        // Final reload to ensure consistency after background sync is done
+        if (this.backendUrl && this.syncQueue.length === 0) {
+            await this.loadFromStorage();
+            // Dispatch event for app.js to refresh if needed
+            window.dispatchEvent(new CustomEvent('tournamentSyncComplete'));
+        }
     }
 
     setBackendUrl(url) {
@@ -286,8 +329,14 @@ class TournamentManager {
             throw new Error(`Judge with name "${name}" already exists`);
         }
 
+        // 1. Create locally first
+        const judge = new Judge(this.data.next_judge_id++, name.trim(), institution.trim());
+        this.judges.push(judge);
+        this.saveToStorage();
+
+        // 2. Enqueue Sync
         if (this.backendUrl) {
-            try {
+            this.enqueueSync(async () => {
                 const response = await fetch(`${this.backendUrl}/api/judge`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -296,25 +345,17 @@ class TournamentManager {
 
                 if (response.ok) {
                     const result = await response.json();
-                    const j = result.judge;
-                    const judge = new Judge(j.id, j.name, j.institution);
-                    this.judges.push(judge);
-                    this.saveToStorage();
-                    return judge;
+                    // Update the temporary ID with the real ID from backend if different
+                    // Actually, our local ID management should be consistent with backend,
+                    // but it's safer to refresh data after sync.
+                    judge.id = result.judge.id;
                 } else {
                     const error = await response.json();
                     throw new Error(error.error || 'Backend judge addition failed');
                 }
-            } catch (e) {
-                console.error("Cloud judge addition failed:", e);
-                alert("Failed to add judge on cloud: " + e.message);
-                throw e;
-            }
+            });
         }
 
-        const judge = new Judge(this.data.next_judge_id++, name.trim(), institution.trim());
-        this.judges.push(judge);
-        this.saveToStorage();
         return judge;
     }
 
@@ -330,8 +371,13 @@ class TournamentManager {
             throw new Error(`Cannot remove judge "${judge.name}" - they are assigned to ${judge.matches_judged.length} match(es)`);
         }
 
+        // 1. Remove locally
+        this.judges = this.judges.filter(j => j.id !== judgeId);
+        this.saveToStorage();
+
+        // 2. Enqueue Sync
         if (this.backendUrl) {
-            try {
+            this.enqueueSync(async () => {
                 const response = await fetch(`${this.backendUrl}/api/judge`, {
                     method: 'DELETE',
                     headers: { 'Content-Type': 'application/json' },
@@ -342,31 +388,34 @@ class TournamentManager {
                     const error = await response.json();
                     throw new Error(error.error || 'Backend judge removal failed');
                 }
-            } catch (e) {
-                console.error("Cloud judge removal failed:", e);
-                alert("Failed to remove judge on cloud: " + e.message);
-                throw e;
-            }
+            });
         }
-
-        this.judges = this.judges.filter(j => j.id !== judgeId);
-        this.saveToStorage();
     }
 
     // Assign a judge to a match
     async assignJudgeToMatch(matchId, judgeId) {
         const match = this.data.matches.find(m => m.match_id === matchId);
-        if (!match) {
-            throw new Error(`Match ${matchId} not found`);
-        }
+        if (!match) throw new Error(`Match ${matchId} not found`);
 
         const judge = this.judges.find(j => j.id === judgeId);
-        if (!judge) {
-            throw new Error(`Judge ${judgeId} not found`);
-        }
+        if (!judge) throw new Error(`Judge ${judgeId} not found`);
 
+        // 1. Update locally
+        if (match.judge_id !== null) {
+            const oldJudge = this.judges.find(j => j.id === match.judge_id);
+            if (oldJudge) {
+                oldJudge.matches_judged = oldJudge.matches_judged.filter(mid => mid !== matchId);
+            }
+        }
+        match.judge_id = judgeId;
+        if (!judge.matches_judged.includes(matchId)) {
+            judge.matches_judged.push(matchId);
+        }
+        this.saveToStorage();
+
+        // 2. Enqueue Sync
         if (this.backendUrl) {
-            try {
+            this.enqueueSync(async () => {
                 const response = await fetch(`${this.backendUrl}/api/assign_judge`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -377,41 +426,26 @@ class TournamentManager {
                     const error = await response.json();
                     throw new Error(error.error || 'Backend judge assignment failed');
                 }
-                await this.loadFromStorage(); // Reload data from backend after successful assignment
-            } catch (e) {
-                console.error("Cloud judge assignment failed:", e);
-                alert("Failed to assign judge on cloud: " + e.message);
-                throw e;
-            }
+            });
         }
-
-        // If match already has a judge, unassign them first locally
-        if (match.judge_id !== null) {
-            const oldJudge = this.judges.find(j => j.id === match.judge_id);
-            if (oldJudge) {
-                oldJudge.matches_judged = oldJudge.matches_judged.filter(mid => mid !== matchId);
-            }
-        }
-
-        // Assign the new judge
-        match.judge_id = judgeId;
-        if (!judge.matches_judged.includes(matchId)) {
-            judge.matches_judged.push(matchId);
-        }
-
-        this.saveToStorage();
     }
 
     // Unassign a judge from a match
     async unassignJudgeFromMatch(matchId) {
         const match = this.data.matches.find(m => m.match_id === matchId);
-        if (!match) {
-            throw new Error(`Match ${matchId} not found`);
-        }
+        if (!match) throw new Error(`Match ${matchId} not found`);
 
         if (match.judge_id !== null) {
+            const judge = this.judges.find(j => j.id === match.judge_id);
+            if (judge) {
+                judge.matches_judged = judge.matches_judged.filter(mid => mid !== matchId);
+            }
+            match.judge_id = null;
+            this.saveToStorage();
+
+            // 2. Enqueue Sync
             if (this.backendUrl) {
-                try {
+                this.enqueueSync(async () => {
                     const response = await fetch(`${this.backendUrl}/api/assign_judge`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -422,20 +456,8 @@ class TournamentManager {
                         const error = await response.json();
                         throw new Error(error.error || 'Backend judge unassignment failed');
                     }
-                    await this.loadFromStorage(); // Reload data from backend after successful unassignment
-                } catch (e) {
-                    console.error("Cloud judge unassignment failed:", e);
-                    alert("Failed to unassign judge on cloud: " + e.message);
-                    throw e;
-                }
+                });
             }
-
-            const judge = this.judges.find(j => j.id === match.judge_id);
-            if (judge) {
-                judge.matches_judged = judge.matches_judged.filter(mid => mid !== matchId);
-            }
-            match.judge_id = null;
-            this.saveToStorage();
         }
     }
 
@@ -761,9 +783,40 @@ class TournamentManager {
     // Report result for a match
     // speakerPoints: {affPoints: [p1, p2], negPoints: [p3, p4]} (optional)
     async reportResult(matchId, outcome, speakerPoints = null) {
+        // Validation
+        const match = this.data.matches.find(m => m.match_id === matchId);
+        if (!match) throw new Error(`Match ${matchId} not found`);
+        if (match.result !== null) throw new Error(`Match ${matchId} already has a result`);
+        if (outcome !== 'A' && outcome !== 'N') throw new Error(`Invalid outcome: ${outcome}`);
+
+        // 1. Update Local State Immediately
+        match.result = outcome;
+        if (speakerPoints) {
+            this.storeSpeakerPoints(matchId, speakerPoints);
+        }
+
+        const judgeId = (match.judge_id !== null && match.judge_id !== undefined) ? match.judge_id : -1;
+        let spString = "";
+        const pointsToLog = speakerPoints || match.speaker_points;
+
+        if (pointsToLog) {
+            const a1 = pointsToLog.affPoints[0] !== null ? pointsToLog.affPoints[0] : "null";
+            const a2 = pointsToLog.affPoints[1] !== null ? pointsToLog.affPoints[1] : "null";
+            const n1 = pointsToLog.negPoints[0] !== null ? pointsToLog.negPoints[0] : "null";
+            const n2 = pointsToLog.negPoints[1] !== null ? pointsToLog.negPoints[1] : "null";
+            spString = ` ${a1} ${a2} ${n1} ${n2}`;
+        }
+
+        if (this.data.result_file_content === undefined || this.data.result_file_content === null) {
+            this.data.result_file_content = "";
+        }
+        this.data.result_file_content += `${match.round_num} ${match.match_id} ${match.aff_id} ${match.neg_id} ${outcome} ${judgeId}${spString}\n`;
+        this.recalculateStats();
+        this.saveToStorage();
+
+        // 2. Enqueue Background Sync if Cloud Mode
         if (this.backendUrl) {
-            // Cloud Mode
-            try {
+            this.enqueueSync(async () => {
                 const response = await fetch(`${this.backendUrl}/api/report`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -774,79 +827,21 @@ class TournamentManager {
                     })
                 });
 
-                if (response.ok) {
-                    await this.loadFromStorage(); // Reload data from backend after successful report
-                    return true;
-                } else {
+                if (!response.ok) {
                     const err = await response.json();
                     throw new Error(err.error || 'Backend report failed');
                 }
-            } catch (e) {
-                console.error("Cloud report failed:", e);
-                alert("Failed to report result on cloud: " + e.message);
-                return false;
-            }
+            });
         }
 
-        // Local Mode
-        const match = this.data.matches.find(m => m.match_id === matchId);
-        if (!match) {
-            throw new Error(`Match ${matchId} not found`);
-        }
-
-        if (match.result !== null) {
-            throw new Error(`Match ${matchId} already has a result`);
-        }
-
-        if (outcome !== 'A' && outcome !== 'N') {
-            throw new Error(`Invalid outcome: ${outcome}`);
-        }
-
-        match.result = outcome;
-
-        // Build result line with judge_id (always included, -1 if none)
-        const judgeId = (match.judge_id !== null && match.judge_id !== undefined) ? match.judge_id : -1;
-
-        let spString = "";
-        // Use provided points or existing points in match
-        const pointsToLog = speakerPoints || match.speaker_points;
-
-        if (pointsToLog) {
-            // If new points provided, store them
-            if (speakerPoints) {
-                this.storeSpeakerPoints(matchId, speakerPoints);
-            }
-
-            // Format for file: Aff1 Aff2 Neg1 Neg2
-            const a1 = pointsToLog.affPoints[0] !== null ? pointsToLog.affPoints[0] : "null";
-            const a2 = pointsToLog.affPoints[1] !== null ? pointsToLog.affPoints[1] : "null";
-            const n1 = pointsToLog.negPoints[0] !== null ? pointsToLog.negPoints[0] : "null";
-            const n2 = pointsToLog.negPoints[1] !== null ? pointsToLog.negPoints[1] : "null";
-            spString = ` ${a1} ${a2} ${n1} ${n2}`;
-        }
-
-        // Update result file content: Round MatchID AffID NegID Outcome JudgeID [SP1 SP2 SP3 SP4]
-        this.data.result_file_content += `${match.round_num} ${match.match_id} ${match.aff_id} ${match.neg_id} ${outcome} ${judgeId}${spString}\n`;
-
-        this.recalculateStats();
-        this.saveToStorage();
-        return true;
+        return true; // Optimistic Success
     }
 
     // Update match result (allows overwrite)
     async updateResult(matchId, newOutcome, speakerPoints = null) {
-        if (this.backendUrl) {
-            // Cloud Mode - Reuse report endpoint as it handles updates
-            // The backend report endpoint should handle updating existing results
-            return this.reportResult(matchId, newOutcome, speakerPoints);
-        }
-
-        // Local Mode
+        // 1. Update Local State Immediately
         const match = this.data.matches.find(m => m.match_id === matchId);
-        if (!match) {
-            throw new Error(`Match ${matchId} not found`);
-        }
-
+        if (!match) throw new Error(`Match ${matchId} not found`);
         if (newOutcome !== null && newOutcome !== 'A' && newOutcome !== 'N') {
             throw new Error(`Invalid outcome: ${newOutcome}`);
         }
@@ -854,16 +849,19 @@ class TournamentManager {
         match.result = newOutcome;
 
         // Update result file content: Comment out old lines for this match
+        if (this.data.result_file_content === undefined || this.data.result_file_content === null) {
+            this.data.result_file_content = "";
+        }
         const lines = this.data.result_file_content.split('\n');
         const newLines = lines.map(line => {
             const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith('#')) return line; // Already comment or empty
+            if (!trimmed || trimmed.startsWith('#')) return line;
 
             const parts = trimmed.split(/\s+/);
             if (parts.length >= 2) {
                 const mid = Number(parts[1]);
                 if (mid === matchId) {
-                    return `# ${line} # Updated/Corrected`; // Comment out
+                    return `# ${line} # Updated/Corrected`;
                 }
             }
             return line;
@@ -874,17 +872,13 @@ class TournamentManager {
         // Append new result if exists
         if (newOutcome !== null) {
             const judgeId = (match.judge_id !== null && match.judge_id !== undefined) ? match.judge_id : -1;
-
             let spString = "";
-            // Use provided points or existing points in match
             const pointsToLog = speakerPoints || match.speaker_points;
 
             if (pointsToLog) {
-                // If new points provided, store them
                 if (speakerPoints) {
                     this.storeSpeakerPoints(matchId, speakerPoints);
                 }
-
                 const sp = pointsToLog;
                 const a1 = sp.affPoints[0] !== null ? sp.affPoints[0] : "null";
                 const a2 = sp.affPoints[1] !== null ? sp.affPoints[1] : "null";
@@ -899,7 +893,28 @@ class TournamentManager {
 
         this.recalculateStats();
         this.saveToStorage();
-        return true;
+
+        // 2. Enqueue Background Sync if Cloud Mode
+        if (this.backendUrl) {
+            this.enqueueSync(async () => {
+                const response = await fetch(`${this.backendUrl}/api/report`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        match_id: matchId,
+                        result: newOutcome,
+                        speaker_points: speakerPoints
+                    })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Backend update failed');
+                }
+            });
+        }
+
+        return true; // Optimistic Success
     }
 
     // Recalculate all team statistics
@@ -1312,6 +1327,7 @@ class TournamentManager {
 
     // Validate result redundancy
     validateResultRedundancy(matches, content) {
+        if (!content) content = "";
         const lines = content.split('\n').filter(l => l.trim() && !l.startsWith('#'));
         const matchesWithResults = matches.filter(m => m.result !== null);
 

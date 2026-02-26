@@ -40,6 +40,25 @@ function hideLoading() {
     }
 }
 
+// Sync Indicator Logic
+const syncIndicator = document.getElementById('syncIndicator');
+tournament.onSyncStatusChange = (isSyncing) => {
+    if (isSyncing) {
+        syncIndicator.classList.remove('sync-complete');
+        syncIndicator.classList.add('visible');
+    } else {
+        syncIndicator.classList.add('sync-complete');
+        setTimeout(() => {
+            syncIndicator.classList.remove('visible');
+        }, 2000);
+    }
+};
+
+// Listen for sync completion to refresh UI if needed
+window.addEventListener('tournamentSyncComplete', () => {
+    updateDashboard();
+});
+
 function setButtonsLoading(selector, loading) {
     const buttons = document.querySelectorAll(selector);
     buttons.forEach(btn => {
@@ -1193,14 +1212,12 @@ window.updateParticipantStandings = function () {
 
 // Report Result
 window.reportResult = async function (matchId, outcome) {
-    showLoading('Reporting result...');
     try {
         await tournament.reportResult(matchId, outcome);
+        // Refresh UI immediately (optimistic)
         updateDashboard();
     } catch (error) {
         showNotification('Error', error.message);
-    } finally {
-        hideLoading();
     }
 };
 
@@ -1222,7 +1239,6 @@ window.showSpeakerPointInput = function (matchId, index) {
 };
 
 // Submit Speaker Point for Individual Participant
-// Submit Speaker Point for Individual Participant
 window.submitSpeakerPoint = async function (matchId, index) {
     const inputId = `sp_input_${matchId}_${index}`;
     const input = document.getElementById(inputId);
@@ -1233,33 +1249,26 @@ window.submitSpeakerPoint = async function (matchId, index) {
         return;
     }
 
-    // Get current match data to preserve other points
     const match = tournament.data.matches.find(m => m.match_id === parseInt(matchId));
     if (!match) return;
 
-    // Construct speaker points object
     const currentSP = match.speaker_points || { affPoints: [null, null], negPoints: [null, null] };
     const newSP = {
         affPoints: [...currentSP.affPoints],
         negPoints: [...currentSP.negPoints]
     };
 
-    // Update specific point
     if (index === 'aff_0') newSP.affPoints[0] = value;
     if (index === 'aff_1') newSP.affPoints[1] = value;
     if (index === 'neg_0') newSP.negPoints[0] = value;
     if (index === 'neg_1') newSP.negPoints[1] = value;
 
-    showLoading('Updating speaker points...');
     try {
         await tournament.updateResult(parseInt(matchId), match.result, newSP);
-        // Refresh view
         const activeRound = parseInt(activeTab.replace('round', ''));
         showRound(activeRound);
     } catch (error) {
         showNotification('Error', error.message);
-    } finally {
-        hideLoading();
     }
 };
 
@@ -1282,17 +1291,13 @@ window.correctResult = function (matchId, currentResult) {
     showConfirm(
         'Switch Winner',
         'Are you sure you want to switch the winner? This will update standings but preserve existing pairings.',
-        async () => { // Made callback async
-            showLoading('Updating winner...');
+        async () => {
             try {
-                await tournament.updateResult(matchId, newOutcome); // Added await
-                // Refresh view
+                await tournament.updateResult(matchId, newOutcome);
                 const activeRound = parseInt(activeTab.replace('round', ''));
-                showRound(activeRound); // Changed updateDashboard to showRound
+                showRound(activeRound);
             } catch (error) {
                 showNotification('Error', error.message);
-            } finally {
-                hideLoading();
             }
         }
     );
@@ -1304,14 +1309,11 @@ window.unsubmitResult = function (matchId) {
         'Unsubmit Result',
         'Are you sure you want to remove this result? This will update standings but preserve existing pairings.',
         async () => {
-            showLoading('Removing result...');
             try {
                 await tournament.updateResult(matchId, null);
                 updateDashboard();
             } catch (error) {
                 showNotification('Error', error.message);
-            } finally {
-                hideLoading();
             }
         }
     );
@@ -1586,21 +1588,19 @@ window.hideAddJudgeForm = function () {
 };
 
 async function submitAddJudge(event) {
-    event.preventDefault();
+    if (event) event.preventDefault();
+    const nameInput = document.getElementById('judgeName');
+    const instInput = document.getElementById('judgeInstitution');
+    const name = nameInput.value.trim();
+    const institution = instInput.value.trim();
 
-    const name = document.getElementById('judgeName').value.trim();
-    const institution = document.getElementById('judgeInstitution').value.trim();
-
-    showLoading('Adding judge...');
     try {
         await tournament.addJudge(name, institution);
-        hideAddJudgeForm(); // Hide form after successful add
-        showJudges(); // Refresh the view
+        hideAddJudgeForm();
+        showJudges();
         showNotification('Success', `Judge "${name}" added successfully!`);
     } catch (error) {
         showNotification('Error', error.message);
-    } finally {
-        hideLoading();
     }
 }
 
@@ -1612,15 +1612,12 @@ window.deleteJudge = function (judgeId) {
         'Delete Judge',
         `Are you sure you want to delete judge "${judge.name}"?`,
         async () => {
-            showLoading('Deleting judge...');
             try {
                 await tournament.removeJudge(judgeId);
-                showJudges(); // Refresh the view
+                showJudges();
                 showNotification('Success', `Judge "${judge.name}" deleted successfully!`);
             } catch (error) {
                 showNotification('Error', error.message);
-            } finally {
-                hideLoading();
             }
         }
     );
@@ -1848,19 +1845,18 @@ window.assignJudge = async function (matchId) {
     const selectElement = document.getElementById(`judge_select_${matchId}`);
     if (!selectElement) return;
 
-    const judgeId = parseInt(selectElement.value);
-    if (!judgeId) {
-        showNotification('Error', 'Please select a judge');
+    const val = selectElement.value;
+    const judgeId = parseInt(val);
+
+    if (val === "" || isNaN(judgeId)) {
+        showNotification('Error', 'Please select a judge from the search results');
         return;
     }
 
     try {
         await tournament.assignJudgeToMatch(matchId, judgeId);
-        // Refresh the current round view
         const match = tournament.data.matches.find(m => m.match_id === matchId);
-        if (match) {
-            showRound(match.round_num);
-        }
+        if (match) showRound(match.round_num);
         const judge = tournament.judges.find(j => j.id === judgeId);
         showNotification('Success', `Judge "${judge.name}" assigned to Match ${matchId}`);
     } catch (error) {
@@ -1871,11 +1867,8 @@ window.assignJudge = async function (matchId) {
 window.unassignJudge = async function (matchId) {
     try {
         await tournament.unassignJudgeFromMatch(matchId);
-        // Refresh the current round view
         const match = tournament.data.matches.find(m => m.match_id === matchId);
-        if (match) {
-            showRound(match.round_num);
-        }
+        if (match) showRound(match.round_num);
         showNotification('Success', `Judge unassigned from Match ${matchId}`);
     } catch (error) {
         showNotification('Error', error.message);
