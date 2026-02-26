@@ -126,6 +126,9 @@ async function initUI() {
 function showSetup() {
     setupSection.classList.remove('hidden');
     dashboardSection.classList.add('hidden');
+    if (setupForm) setupForm.reset();
+    const teamData = document.getElementById('teamData');
+    if (teamData) teamData.value = '';
 }
 
 function showDashboard() {
@@ -329,7 +332,7 @@ resetBtn.addEventListener('click', () => {
         async () => {
             showLoading('Resetting tournament...');
             try {
-                await tournament.clearStorage();
+                await tournament.clearStorage(true);
                 location.reload();
             } catch (e) {
                 showNotification('Error', 'Failed to reset tournament: ' + e.message);
@@ -407,9 +410,8 @@ importFile.addEventListener('change', (e) => {
 
 // Update Dashboard
 function updateDashboard() {
-    console.log('updateDashboard called. tournament.data:', tournament.data);
-    if (!tournament.data) {
-        console.error('tournament.data is null in updateDashboard!');
+    if (!tournament || !tournament.data || !tournament.data.config) {
+        console.log('updateDashboard: No tournament data available to render.');
         return;
     }
     // Update tournament info
@@ -426,6 +428,10 @@ function updateDashboard() {
 
 // Render Dynamic Tabs
 function renderTabs() {
+    if (!tournament || !tournament.data || !tournament.data.config || !tournament.data.matches) {
+        mainTabs.innerHTML = '';
+        return;
+    }
     const matches = tournament.data.matches;
     const maxPairedRound = matches.length > 0 ? Math.max(...matches.map(m => m.round_num)) : 0;
     console.log('renderTabs called. matches.length:', matches.length, 'maxPairedRound:', maxPairedRound);
@@ -520,8 +526,21 @@ function renderTabs() {
         return;
     }
 
-    // Default behavior (initial load or invalid state) - show Entries
-    showEntries();
+    // Default behavior (initial load or invalid state) - show Entries if nothing else is active
+    if (!activeTab || activeTab === 'entries') {
+        showEntries();
+    } else if (activeTab === 'standings') {
+        showStandings();
+    } else if (activeTab === 'judges') {
+        showJudges();
+    } else if (activeTab.startsWith('round')) {
+        const rNum = parseInt(activeTab.replace('round', ''));
+        if (rNum <= maxPairedRound) {
+            showRound(rNum);
+        } else {
+            showEntries();
+        }
+    }
 }
 
 // Handle New Round Button
@@ -562,6 +581,7 @@ async function handleNewRound() {
 
 // Show Round View
 function showRound(roundNum, highlightMatchId = null) {
+    if (!tournament || !tournament.data || !tournament.data.config) return;
     activeTab = `round${roundNum}`;
     window.location.hash = `round${roundNum}`;
 
@@ -1035,17 +1055,21 @@ function showJudges() {
 
 // Show Standings
 function showStandings() {
+    if (!tournament || !tournament.data || !tournament.data.config) {
+        tabContent.innerHTML = '<div class="card"><p class="text-muted">No data available yet. Please initialize the tournament.</p></div>';
+        return;
+    }
     activeTab = 'standings';
     window.location.hash = 'standings';
 
-    // Add to navigation history (avoid duplicates of current view)
+    // Add to navigation history
     if (navigationHistory[navigationHistory.length - 1] !== activeTab) {
         navigationHistory.push(activeTab);
     }
 
     // Update active state
     document.querySelectorAll('.tab-btn').forEach(btn => {
-        if (btn.dataset.tab === 'standings') {
+        if (btn.textContent === 'Standings') {
             btn.classList.add('active');
         } else {
             btn.classList.remove('active');
@@ -1054,7 +1078,7 @@ function showStandings() {
 
     const standings = tournament.getStandings(); // Get full standings for initial check
 
-    if (standings.every(t => t.score === 0)) {
+    if (!standings || standings.every(t => t.score === 0)) {
         tabContent.innerHTML = '<div class="card"><p class="text-muted">No results yet. Generate pairings and enter results to see standings.</p></div>';
         return;
     }
@@ -1732,25 +1756,29 @@ if (tournamentSelect) {
 }
 
 if (newTournamentBtn) {
-    newTournamentBtn.addEventListener('click', () => {
+    newTournamentBtn.addEventListener('click', async () => {
         const newId = prompt("Enter a unique ID for the new tournament (no spaces, e.g., 'spring-2026'):");
         if (newId && newId.trim()) {
             const cleanId = newId.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
             tournament.setTournamentId(cleanId);
-            // Switch to setup view for new tournament
-            showSetup();
-            // Update UI title/info
-            updateDashboard();
-            // Refresh tournament list to include new one
-            fetchTournaments();
+
+            showLoading(`Preparing new tournament ${cleanId}...`);
+            try {
+                // This will clear previous data and try to fetch (will likely be null)
+                await tournament.loadFromStorage();
+                await initUI();
+            } finally {
+                hideLoading();
+            }
+
+            // Refresh tournament list to include new one if backend is connected
+            if (tournament.backendUrl) {
+                fetchTournaments();
+            }
         }
     });
 }
 
-function showSetup() {
-    setupSection.classList.remove('hidden');
-    dashboardSection.classList.add('hidden');
-}
 
 // Handle browser back/forward navigation
 window.addEventListener('hashchange', () => {

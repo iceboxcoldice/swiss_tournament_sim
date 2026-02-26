@@ -108,6 +108,11 @@ class TournamentManager {
             this.tournamentId = savedId;
         }
 
+        // Clear current state before loading new tournament
+        this.data = null;
+        this.teams = [];
+        this.judges = [];
+
         if (this.backendUrl) {
             // Cloud Mode
             try {
@@ -117,26 +122,38 @@ class TournamentManager {
                     this.data = data;
                     this.reconstructObjects();
                     return;
+                } else if (response.status === 404) {
+                    // Tournament doesn't exist on backend yet
+                    console.log(`Tournament ${this.tournamentId} not found on backend. Starting fresh.`);
+                    return;
                 }
             } catch (e) {
                 console.error("Failed to load from cloud:", e);
-                // Fallback to local? Or just show error?
-                // For now, let's fallback to local but keep URL set
+                // In cloud mode, if the network is down or fetch fails, 
+                // we should probably NOT fallback to a potentially unrelated local tournament
+                // unless we find a namespaced local backup.
             }
         }
 
-        // Local Mode
-        const storedData = localStorage.getItem('tournamentData');
+        // Local Mode or Offline Fallback
+        // Use namespaced key for local storage to prevent data leakage between tournaments
+        const localKey = `tournamentData_${this.tournamentId}`;
+        const storedData = localStorage.getItem(localKey) || localStorage.getItem('tournamentData'); // Fallback to old key for migration
+
         if (storedData) {
-            this.data = JSON.parse(storedData);
-            this.reconstructObjects();
+            try {
+                this.data = JSON.parse(storedData);
+                this.reconstructObjects();
+            } catch (e) {
+                console.error("Failed to parse local tournament data:", e);
+            }
         }
     }
 
     async saveToStorage() {
         if (!this.data) return;
 
-        // Update this.data.teams from this.teams to ensure stats (like speaker points history) are persisted
+        // Update this.data.teams from this.teams to ensure stats are persisted
         this.data.teams = this.teams.map(t => {
             // Create a plain object for storage
             const plain = { ...t };
@@ -148,7 +165,11 @@ class TournamentManager {
             this.data.judges = this.judges.map(j => ({ id: j.id, name: j.name, institution: j.institution }));
         }
 
-        // Always save local backup
+        // Always save local backup with namespaced key
+        const localKey = `tournamentData_${this.tournamentId}`;
+        localStorage.setItem(localKey, JSON.stringify(this.data));
+
+        // Legacy support (optional: keep 'tournamentData' as the "active" one)
         localStorage.setItem('tournamentData', JSON.stringify(this.data));
     }
 
@@ -267,9 +288,14 @@ class TournamentManager {
                         if (!this.data.rounds) this.data.rounds = [];
                         this.data.rounds.push(result.matches.map(m => m.match_id));
                         console.log('Merged pair result. matches now:', this.data.matches.length);
+
+                        // Update local storage so refreshes see it
+                        this.saveToStorage();
+
+                        // BROADCAST sync completion so UI can refresh
+                        window.dispatchEvent(new CustomEvent('tournamentSyncComplete'));
                     }
-                    // Also do a background full sync (non-blocking)
-                    this.loadFromStorage().catch(e => console.warn('Background sync failed:', e));
+                    // Removed background loadFromStorage() to avoid race condition
                     return result.matches;
                 } else {
                     const err = await response.json();
@@ -1320,7 +1346,7 @@ class TournamentManager {
     }
 
     // Clear all storage
-    async clearStorage() {
+    async clearStorage(keepConnection = false) {
         if (this.backendUrl) {
             try {
                 const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/reset`, {
@@ -1332,15 +1358,24 @@ class TournamentManager {
                 }
             } catch (e) {
                 console.error("Failed to clear cloud storage:", e);
-                throw new Error("Could not clear cloud tournament. Please check your connection.");
+                // We'll still clear local data even if network fails, or throw
+                // throw new Error("Could not clear cloud tournament. Please check your connection.");
             }
         }
+
         localStorage.removeItem('tournamentData');
-        localStorage.removeItem('backendUrl');
+
+        if (!keepConnection) {
+            localStorage.removeItem('backendUrl');
+            localStorage.removeItem('tournamentId');
+            this.backendUrl = null;
+            this.tournamentId = 'default';
+        }
+
         this.data = null;
         this.teams = [];
         this.judges = [];
-        this.backendUrl = null;
+        this.syncQueue = [];
     }
 
     // Generate pairing file content

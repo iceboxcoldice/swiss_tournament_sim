@@ -28,47 +28,71 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # GCS Configuration
-BUCKET_NAME = os.environ.get('GCS_BUCKET_NAME', 'swiss-tournament-data')
+BUCKET_NAME = os.environ.get('GCS_BUCKET_NAME')
 DEFAULT_TOURNAMENT_ID = 'default'
+LOCAL_STORAGE_DIR = 'local_storage'
+
+if not BUCKET_NAME:
+    logger.info("GCS_BUCKET_NAME not set. Using local filesystem storage.")
+    if not os.path.exists(LOCAL_STORAGE_DIR):
+        os.makedirs(LOCAL_STORAGE_DIR)
 
 def get_storage_client():
     return storage.Client()
 
 def get_blob_path(tournament_id):
-    """Get the GCS blob path for a specific tournament."""
+    """Get the storage path for a specific tournament."""
     if not tournament_id:
         tournament_id = DEFAULT_TOURNAMENT_ID
-    return f"tournaments/{tournament_id}/tournament.json"
+    if BUCKET_NAME:
+        return f"tournaments/{tournament_id}/tournament.json"
+    else:
+        # Local path
+        t_dir = os.path.join(LOCAL_STORAGE_DIR, tournament_id)
+        if not os.path.exists(t_dir):
+            os.makedirs(t_dir)
+        return os.path.join(t_dir, 'tournament.json')
 
 def load_tournament_from_gcs(tournament_id=DEFAULT_TOURNAMENT_ID):
-    """Load tournament data from GCS."""
+    """Load tournament data from storage (GCS or Local)."""
     try:
-        client = get_storage_client()
-        bucket = client.bucket(BUCKET_NAME)
-        blob_path = get_blob_path(tournament_id)
-        blob = bucket.blob(blob_path)
+        path = get_blob_path(tournament_id)
         
-        if not blob.exists():
-            return None
-            
-        data_str = blob.download_as_text()
+        if BUCKET_NAME:
+            client = get_storage_client()
+            bucket = client.bucket(BUCKET_NAME)
+            blob = bucket.blob(path)
+            if not blob.exists():
+                return None
+            data_str = blob.download_as_text()
+        else:
+            if not os.path.exists(path):
+                return None
+            with open(path, 'r') as f:
+                data_str = f.read()
+                
         return json.loads(data_str)
     except Exception as e:
-        logger.error(f"Error loading {tournament_id} from GCS: {e}")
+        logger.error(f"Error loading {tournament_id}: {e}")
         return None
 
 def save_tournament_to_gcs(data, tournament_id=DEFAULT_TOURNAMENT_ID):
-    """Save tournament data to GCS."""
+    """Save tournament data to storage (GCS or Local)."""
     try:
-        client = get_storage_client()
-        bucket = client.bucket(BUCKET_NAME)
-        blob_path = get_blob_path(tournament_id)
-        blob = bucket.blob(blob_path)
+        path = get_blob_path(tournament_id)
+        data_str = json.dumps(data, indent=2)
         
-        blob.upload_from_string(json.dumps(data, indent=2), content_type='application/json')
+        if BUCKET_NAME:
+            client = get_storage_client()
+            bucket = client.bucket(BUCKET_NAME)
+            blob = bucket.blob(path)
+            blob.upload_from_string(data_str, content_type='application/json')
+        else:
+            with open(path, 'w') as f:
+                f.write(data_str)
         return True
     except Exception as e:
-        logger.error(f"Error saving {tournament_id} to GCS: {e}")
+        logger.error(f"Error saving {tournament_id}: {e}")
         return False
 
 # Monkey patch tournament_manager to use GCS instead of local file
@@ -101,22 +125,30 @@ def health_check():
 
 @app.route('/api/tournaments', methods=['GET'])
 def list_tournaments():
-    """List all available tournaments by scanning GCS buckets."""
+    """List all available tournaments by scanning GCS buckets or local storage."""
     try:
-        client = get_storage_client()
-        bucket = client.bucket(BUCKET_NAME)
-        # List blobs with delimiter to find "folders" under tournaments/
-        blobs = client.list_blobs(BUCKET_NAME, prefix="tournaments/", delimiter="/")
-        
-        # Consume the iterator to get prefixes
-        list(blobs) 
-        prefixes = blobs.prefixes
-        
-        tournaments = []
-        for p in prefixes:
-            # p is like "tournaments/id/"
-            t_id = p.split('/')[-2]
-            tournaments.append(t_id)
+        if BUCKET_NAME:
+            client = get_storage_client()
+            bucket = client.bucket(BUCKET_NAME)
+            # List blobs with delimiter to find "folders" under tournaments/
+            blobs = client.list_blobs(BUCKET_NAME, prefix="tournaments/", delimiter="/")
+            
+            # Consume the iterator to get prefixes
+            list(blobs) 
+            prefixes = blobs.prefixes
+            
+            tournaments = []
+            for p in prefixes:
+                # p is like "tournaments/id/"
+                t_id = p.split('/')[-2]
+                tournaments.append(t_id)
+        else:
+            # Local storage scanning
+            tournaments = []
+            if os.path.exists(LOCAL_STORAGE_DIR):
+                for t_id in os.listdir(LOCAL_STORAGE_DIR):
+                    if os.path.isdir(os.path.join(LOCAL_STORAGE_DIR, t_id)):
+                        tournaments.append(t_id)
             
         if not tournaments and load_tournament_from_gcs(DEFAULT_TOURNAMENT_ID):
             tournaments = [DEFAULT_TOURNAMENT_ID]
@@ -401,25 +433,42 @@ def report_result(tournament_id):
 
 @app.route('/api/t/<tournament_id>/reset', methods=['POST'])
 def reset_tournament(tournament_id):
-    """Clear tournament data from GCS for a specific tournament."""
+    """Clear tournament data from storage (GCS or Local) for a specific tournament."""
     logger.info(f"Tournament reset requested for {tournament_id} via /api/t/id/reset")
     try:
-        client = get_storage_client()
-        bucket = client.bucket(BUCKET_NAME)
-        blob_path = get_blob_path(tournament_id)
-        blob = bucket.blob(blob_path)
+        path = get_blob_path(tournament_id)
         
-        if blob.exists():
-            blob.delete()
-            logger.info(f"Tournament {tournament_id} data SUCCESSFULLY deleted from GCS")
-            return jsonify({"message": f"Tournament {tournament_id} data cleared"}), 200
+        if BUCKET_NAME:
+            client = get_storage_client()
+            bucket = client.bucket(BUCKET_NAME)
+            blob = bucket.blob(path)
+            
+            if blob.exists():
+                blob.delete()
+                logger.info(f"Tournament {tournament_id} data SUCCESSFULLY deleted from GCS")
+                return jsonify({"message": f"Tournament {tournament_id} data cleared"}), 200
+            else:
+                logger.warning(f"Tournament data blob NOT FOUND for {tournament_id} during reset request")
+                return jsonify({"message": "No tournament data found to clear"}), 200
         else:
-            logger.warning(f"Tournament data blob NOT FOUND for {tournament_id} during reset request")
-            return jsonify({"message": "No tournament data found to clear"}), 200
+            # Local storage cleanup
+            if os.path.exists(path):
+                os.remove(path)
+                # Also try to remove the directory if empty
+                t_dir = os.path.dirname(path)
+                try:
+                    os.rmdir(t_dir)
+                except OSError:
+                    pass # Not empty or other error, fine
+                logger.info(f"Tournament {tournament_id} data SUCCESSFULLY deleted from Local Storage")
+                return jsonify({"message": f"Tournament {tournament_id} data cleared"}), 200
+            else:
+                logger.warning(f"Tournament data file NOT FOUND for {tournament_id} during local reset request")
+                return jsonify({"message": "No tournament data found to clear"}), 200
             
     except Exception as e:
         logger.error(f"Error in reset for {tournament_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    app.run(host='0.0.0.0', port=8081, debug=True)
