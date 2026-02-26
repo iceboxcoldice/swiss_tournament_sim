@@ -88,6 +88,7 @@ tm.save_tournament_impl = patched_save_tournament
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
+    logger.info("Health check requested")
     return jsonify({"status": "ok"}), 200
 
 @app.route('/api/init', methods=['POST'])
@@ -135,8 +136,10 @@ def init_tournament():
         }
         
         if save_tournament_to_gcs(data):
+            logger.info("Tournament initialized successfully")
             return jsonify({"message": "Tournament initialized", "config": data['config']}), 200
         else:
+            logger.error("Failed to save tournament data to GCS during init")
             return jsonify({"error": "Failed to save tournament data"}), 500
             
     except Exception as e:
@@ -146,14 +149,17 @@ def init_tournament():
 @app.route('/api/data', methods=['GET'])
 def get_data():
     """Get full tournament data (for syncing)."""
+    logger.info("Data sync requested")
     data = load_tournament_from_gcs()
     if data:
+        logger.info("Tournament data found and returned")
         response = jsonify(data)
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
         return response, 200
     else:
+        logger.warning("No tournament data found in GCS for sync request")
         return jsonify({"error": "No tournament found"}), 404
 
 @app.route('/api/judge', methods=['POST', 'DELETE'])
@@ -372,16 +378,19 @@ def report_result():
 @app.route('/api/reset', methods=['POST'])
 def reset_tournament():
     """Clear tournament data from GCS."""
+    logger.info("Tournament reset requested via /api/reset")
     try:
         client = get_storage_client()
         bucket = client.bucket(BUCKET_NAME)
         blob = bucket.blob(TOURNAMENT_BLOB_NAME)
         
+        logger.info(f"Checking if blob {TOURNAMENT_BLOB_NAME} exists in bucket {BUCKET_NAME}")
         if blob.exists():
             blob.delete()
-            logger.info("Tournament data deleted from GCS")
+            logger.info("Tournament data SUCCESSFULLY deleted from GCS")
             return jsonify({"message": "Tournament data cleared"}), 200
         else:
+            logger.warning("Tournament data blob NOT FOUND during reset request")
             return jsonify({"message": "No tournament data found to clear"}), 200
             
     except Exception as e:
