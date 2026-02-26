@@ -40,6 +40,7 @@ class TournamentManager {
         this.teams = [];
         this.judges = [];
         this.backendUrl = null;
+        this.tournamentId = 'default'; // Default ID
         this.ready = this.loadFromStorage();
 
         // Optimistic Sync System
@@ -88,19 +89,29 @@ class TournamentManager {
 
     setBackendUrl(url) {
         this.backendUrl = url;
+        localStorage.setItem('backendUrl', url);
+    }
+
+    setTournamentId(id) {
+        this.tournamentId = id;
+        localStorage.setItem('tournamentId', id);
     }
 
     async loadFromStorage() {
-        // Try to load backend URL first
+        // Try to load backend URL and tournament ID first
         const savedUrl = localStorage.getItem('backendUrl');
         if (savedUrl) {
             this.backendUrl = savedUrl;
+        }
+        const savedId = localStorage.getItem('tournamentId');
+        if (savedId) {
+            this.tournamentId = savedId;
         }
 
         if (this.backendUrl) {
             // Cloud Mode
             try {
-                const response = await fetch(`${this.backendUrl}/api/data?_=${Date.now()}`, { cache: 'no-store' });
+                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/data?_=${Date.now()}`, { cache: 'no-store' });
                 if (response.ok) {
                     const data = await response.json();
                     this.data = data;
@@ -162,7 +173,7 @@ class TournamentManager {
         if (this.backendUrl) {
             // Cloud Mode
             try {
-                const response = await fetch(`${this.backendUrl}/api/init`, {
+                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/init`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -178,7 +189,7 @@ class TournamentManager {
                     console.log('Backend init successful:', result);
 
                     // Reload full data from backend
-                    const dataResponse = await fetch(`${this.backendUrl}/api/data?_=${Date.now()}`, { cache: 'no-store' });
+                    const dataResponse = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/data?_=${Date.now()}`, { cache: 'no-store' });
                     if (dataResponse.ok) {
                         const data = await dataResponse.json();
                         console.log('Fetched data from backend:', data);
@@ -240,7 +251,7 @@ class TournamentManager {
         if (this.backendUrl) {
             // Cloud Mode
             try {
-                const response = await fetch(`${this.backendUrl}/api/pair`, {
+                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/pair`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ round: roundNum })
@@ -340,7 +351,7 @@ class TournamentManager {
         // 2. Enqueue Sync
         if (this.backendUrl) {
             this.enqueueSync(async () => {
-                const response = await fetch(`${this.backendUrl}/api/judge`, {
+                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/judge`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ name: name.trim(), institution: institution.trim() })
@@ -381,7 +392,7 @@ class TournamentManager {
         // 2. Enqueue Sync
         if (this.backendUrl) {
             this.enqueueSync(async () => {
-                const response = await fetch(`${this.backendUrl}/api/judge`, {
+                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/judge`, {
                     method: 'DELETE',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ judge_id: judgeId })
@@ -419,7 +430,7 @@ class TournamentManager {
         // 2. Enqueue Sync
         if (this.backendUrl) {
             this.enqueueSync(async () => {
-                const response = await fetch(`${this.backendUrl}/api/assign_judge`, {
+                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/assign_judge`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ match_id: matchId, judge_id: judgeId })
@@ -820,7 +831,7 @@ class TournamentManager {
         // 2. Enqueue Background Sync if Cloud Mode
         if (this.backendUrl) {
             this.enqueueSync(async () => {
-                const response = await fetch(`${this.backendUrl}/api/report`, {
+                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/report`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -900,7 +911,7 @@ class TournamentManager {
         // 2. Enqueue Background Sync if Cloud Mode
         if (this.backendUrl) {
             this.enqueueSync(async () => {
-                const response = await fetch(`${this.backendUrl}/api/report`, {
+                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/report`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1137,7 +1148,7 @@ class TournamentManager {
             // Enqueue Sync for speaker points even if no winner yet
             if (this.backendUrl) {
                 this.enqueueSync(async () => {
-                    const response = await fetch(`${this.backendUrl}/api/report`, {
+                    const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/report`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -1312,7 +1323,7 @@ class TournamentManager {
     async clearStorage() {
         if (this.backendUrl) {
             try {
-                const response = await fetch(`${this.backendUrl}/api/reset`, {
+                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/reset`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
                 });

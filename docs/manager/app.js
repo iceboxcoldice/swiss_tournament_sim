@@ -19,6 +19,8 @@ const notificationMessage = document.getElementById('notificationMessage');
 const notificationOkBtn = document.getElementById('notificationOkBtn');
 const mainTabs = document.getElementById('mainTabs');
 const tabContent = document.getElementById('tabContent');
+const tournamentSelect = document.getElementById('tournamentSelect');
+const newTournamentBtn = document.getElementById('newTournamentBtn');
 
 let activeTab = null;
 let navigationHistory = []; // Track navigation history for back button
@@ -86,7 +88,12 @@ function getElimRoundLabel(elimRoundNum, totalElimRounds) {
 }
 
 // Initialize UI
-function initUI() {
+async function initUI() {
+    // Setup tournament selector
+    if (tournament.backendUrl) {
+        await fetchTournaments();
+    }
+
     if (tournament.data) {
         showDashboard();
 
@@ -1675,6 +1682,76 @@ async function changeJudgeAssignment(matchId) {
     await unassignJudge(matchId);
 };
 
+// Tournament Selection Logic
+async function fetchTournaments() {
+    if (!tournament.backendUrl) return;
+
+    try {
+        const response = await fetch(`${tournament.backendUrl}/api/tournaments`);
+        if (response.ok) {
+            const result = await response.json();
+            populateTournamentSelect(result.tournaments);
+        }
+    } catch (e) {
+        console.error("Failed to fetch tournaments:", e);
+    }
+}
+
+function populateTournamentSelect(tournaments) {
+    if (!tournamentSelect) return;
+
+    // Clear list
+    tournamentSelect.innerHTML = '';
+
+    // Ensure current is in list
+    if (!tournaments.includes(tournament.tournamentId)) {
+        tournaments.push(tournament.tournamentId);
+    }
+
+    tournaments.sort().forEach(id => {
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = id;
+        tournamentSelect.appendChild(opt);
+    });
+
+    tournamentSelect.value = tournament.tournamentId;
+}
+
+if (tournamentSelect) {
+    tournamentSelect.addEventListener('change', async (e) => {
+        const newId = e.target.value;
+        if (newId === tournament.tournamentId) return;
+
+        showLoading(`Switching to tournament ${newId}...`);
+        tournament.setTournamentId(newId);
+        await tournament.loadFromStorage();
+        initUI();
+        hideLoading();
+    });
+}
+
+if (newTournamentBtn) {
+    newTournamentBtn.addEventListener('click', () => {
+        const newId = prompt("Enter a unique ID for the new tournament (no spaces, e.g., 'spring-2026'):");
+        if (newId && newId.trim()) {
+            const cleanId = newId.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+            tournament.setTournamentId(cleanId);
+            // Switch to setup view for new tournament
+            showSetup();
+            // Update UI title/info
+            updateDashboard();
+            // Refresh tournament list to include new one
+            fetchTournaments();
+        }
+    });
+}
+
+function showSetup() {
+    setupSection.classList.remove('hidden');
+    dashboardSection.classList.add('hidden');
+}
+
 // Handle browser back/forward navigation
 window.addEventListener('hashchange', () => {
     if (tournament.data) {
@@ -1685,7 +1762,10 @@ window.addEventListener('hashchange', () => {
 // Initialize on load
 (async () => {
     try {
-        await tournament.loadFromStorage();
+        await tournament.ready;
+        if (tournament.backendUrl) {
+            await fetchTournaments();
+        }
     } catch (e) {
         console.error('Initial load failed:', e);
     }

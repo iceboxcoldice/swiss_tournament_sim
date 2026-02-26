@@ -53,6 +53,39 @@ header h1 {
 .header-actions {
     display: flex;
     gap: 0.5rem;
+    align-items: center;
+}
+
+.tournament-selector-container {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    background: var(--bg-card);
+    padding: 0.25rem 0.5rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+
+.tournament-selector-container label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+#tournamentSelect {
+    background: transparent;
+    border: none;
+    font-size: 0.9rem;
+    color: var(--text);
+    padding: 2px 4px;
+    cursor: pointer;
+}
+
+#newTournamentBtn {
+    padding: 0 6px;
+    font-size: 1.2rem;
+    line-height: 1;
+    min-width: 28px;
 }
 
 .card {
@@ -973,6 +1006,7 @@ header h1 {
 .judge-result-item:hover {
     background: var(--bg-card-hover);
 }
+
 /* Loading Overlay */
 #loadingOverlay {
     position: fixed;
@@ -1000,8 +1034,13 @@ header h1 {
 }
 
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
 }
 
 #loadingMessage {

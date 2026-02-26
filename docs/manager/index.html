@@ -24,6 +24,13 @@
                 </a>
             </div>
             <div class="header-actions">
+                <div class="tournament-selector-container">
+                    <label for="tournamentSelect">Tournament: </label>
+                    <select id="tournamentSelect" class="btn btn-secondary" style="width: auto;">
+                        <option value="default">Default</option>
+                    </select>
+                    <button id="newTournamentBtn" class="btn btn-secondary" title="Create New Tournament">+</button>
+                </div>
                 <button id="exportBtn" class="btn btn-secondary">📥 Export</button>
                 <button id="importBtn" class="btn btn-secondary">📤 Import</button>
                 <input type="file" id="importFile" accept=".json" style="display: none;">
