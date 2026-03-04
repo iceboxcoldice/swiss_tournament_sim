@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  tournament-manager:
+    build: .
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./local_storage:/app/local_storage
+    environment:
+      - PORT=8081
+    restart: always

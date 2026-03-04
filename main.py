@@ -2,13 +2,13 @@ import os
 import json
 import logging
 from dataclasses import asdict
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from google.cloud import storage
 import tournament_manager as tm
 import swiss_sim
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='docs/manager', static_url_path='')
 # Enable CORS for GitHub Pages and local development
 CORS(app, resources={
     r"/api/*": {
@@ -117,6 +117,18 @@ def patched_save_tournament_with_id(data, teams, tournament_id):
 tm.load_tournament_impl = lambda: patched_load_tournament_with_id(DEFAULT_TOURNAMENT_ID)
 tm.save_tournament_impl = lambda data, teams: patched_save_tournament_with_id(data, teams, DEFAULT_TOURNAMENT_ID)
 
+
+@app.route('/', methods=['GET'])
+def serve_frontend():
+    """Serve the frontend index.html."""
+    return send_from_directory(app.static_folder, 'index.html')
+
+@app.route('/<path:path>', methods=['GET'])
+def serve_static(path):
+    """Serve static files from the frontend directory."""
+    if os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    return send_from_directory(app.static_folder, 'index.html')
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
@@ -471,4 +483,5 @@ def reset_tournament(tournament_id):
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8081, debug=True)
+    port = int(os.environ.get('PORT', 8081))
+    app.run(host='0.0.0.0', port=port, debug=True)

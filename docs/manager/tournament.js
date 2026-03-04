@@ -113,25 +113,32 @@ class TournamentManager {
         this.teams = [];
         this.judges = [];
 
-        if (this.backendUrl) {
-            // Cloud Mode
+        const effectiveBackendUrl = this.backendUrl || (typeof window !== 'undefined' ? window.location.origin : null);
+
+        if (effectiveBackendUrl) {
+            // Cloud/Bundled Backend Mode
             try {
-                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/data?_=${Date.now()}`, { cache: 'no-store' });
+                const response = await fetch(`${effectiveBackendUrl}/api/t/${this.tournamentId}/data?_=${Date.now()}`, {
+                    cache: 'no-store',
+                    signal: AbortSignal.timeout(2000)
+                });
                 if (response.ok) {
                     const data = await response.json();
                     this.data = data;
                     this.reconstructObjects();
+                    // If we successfully hit the backend but didn't have a URL set, 
+                    // we might want to capture it, but for now just using the data is enough.
                     return;
-                } else if (response.status === 404) {
-                    // Tournament doesn't exist on backend yet
-                    console.log(`Tournament ${this.tournamentId} not found on backend. Starting fresh.`);
-                    return;
+                } else if (!this.backendUrl && response.status === 404) {
+                    // In bundled mode, if 404, we don't necessarily bail to localStorage yet
+                    // because the backend is THE source of truth for its own IDs.
                 }
             } catch (e) {
-                console.error("Failed to load from cloud:", e);
-                // In cloud mode, if the network is down or fetch fails, 
-                // we should probably NOT fallback to a potentially unrelated local tournament
-                // unless we find a namespaced local backup.
+                if (this.backendUrl) {
+                    console.error("Failed to load from cloud:", e);
+                } else {
+                    // Expected if no local backend running
+                }
             }
         }
 

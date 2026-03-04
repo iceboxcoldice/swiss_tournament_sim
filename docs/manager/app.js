@@ -1751,13 +1751,20 @@ async function fetchTournaments() {
     let cloudTournaments = [];
     let localTournaments = getLocalTournaments();
 
-    // Try to fetch from cloud first
+    // Default to current host if no backendUrl is set (useful for Docker/bundled mode)
+    const effectiveBackendUrl = tournament.backendUrl || window.location.origin;
+
+    // Try to fetch from cloud/backend first
     try {
-        const url = `${tournament.backendUrl || 'http://localhost:8081'}/api/tournaments`;
+        const url = `${effectiveBackendUrl}/api/tournaments`;
         const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
         if (response.ok) {
             const result = await response.json();
             cloudTournaments = result.tournaments || [];
+
+            // If we're not already in cloud mode but the backend responds, 
+            // maybe we should suggest connecting or just use it.
+            // For now, if we found tournaments, we show them.
         }
     } catch (e) {
         console.warn("Could not fetch tournaments from backend:", e.message);
