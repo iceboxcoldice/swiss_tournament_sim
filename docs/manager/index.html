@@ -24,13 +24,7 @@
                 </a>
             </div>
             <div class="header-actions">
-                <div class="tournament-selector-container">
-                    <label for="tournamentSelect">Tournament: </label>
-                    <select id="tournamentSelect" class="btn btn-secondary" style="width: auto;">
-                        <option value="default">Default</option>
-                    </select>
-                    <button id="newTournamentBtn" class="btn btn-secondary" title="Create New Tournament">+</button>
-                </div>
+                <button id="hubBtn" class="btn btn-secondary" title="Return to Tournament Hub">🏠 Hub</button>
                 <button id="exportBtn" class="btn btn-secondary">📥 Export</button>
                 <button id="importBtn" class="btn btn-secondary">📤 Import</button>
                 <input type="file" id="importFile" accept=".json" style="display: none;">
@@ -40,8 +34,20 @@
             </div>
         </header>
 
+        <!-- Tournament Hub (Landing Page) -->
+        <section id="hubSection" class="card">
+            <div class="hub-header">
+                <h2>Active Tournaments</h2>
+                <button id="newTournamentHubBtn" class="btn btn-success">+ Create New Tournament</button>
+            </div>
+            <div id="tournamentHubGrid" class="hub-grid">
+                <!-- Populated by JS -->
+                <div class="loading-placeholder">Loading tournaments...</div>
+            </div>
+        </section>
+
         <!-- Tournament Setup -->
-        <section id="setupSection" class="card">
+        <section id="setupSection" class="card hidden">
             <h2>Initialize Tournament</h2>
             <form id="setupForm">
                 <div class="form-group">

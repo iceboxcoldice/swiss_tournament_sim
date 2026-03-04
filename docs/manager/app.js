@@ -19,8 +19,10 @@ const notificationMessage = document.getElementById('notificationMessage');
 const notificationOkBtn = document.getElementById('notificationOkBtn');
 const mainTabs = document.getElementById('mainTabs');
 const tabContent = document.getElementById('tabContent');
-const tournamentSelect = document.getElementById('tournamentSelect');
-const newTournamentBtn = document.getElementById('newTournamentBtn');
+const hubSection = document.getElementById('hubSection');
+const hubBtn = document.getElementById('hubBtn');
+const newTournamentHubBtn = document.getElementById('newTournamentHubBtn');
+const tournamentHubGrid = document.getElementById('tournamentHubGrid');
 
 let activeTab = null;
 let navigationHistory = []; // Track navigation history for back button
@@ -89,11 +91,6 @@ function getElimRoundLabel(elimRoundNum, totalElimRounds) {
 
 // Initialize UI
 async function initUI() {
-    // Setup tournament selector
-    if (tournament.backendUrl) {
-        await fetchTournaments();
-    }
-
     if (tournament.data) {
         showDashboard();
 
@@ -119,21 +116,47 @@ async function initUI() {
             showStandings();
         }
     } else {
-        showSetup();
+        showHub();
     }
 }
 
 function showSetup() {
+    hubSection.classList.add('hidden');
     setupSection.classList.remove('hidden');
     dashboardSection.classList.add('hidden');
+    hubBtn.classList.remove('hidden'); // Show hub btn so user can go back
+
     if (setupForm) setupForm.reset();
     const teamData = document.getElementById('teamData');
     if (teamData) teamData.value = '';
 }
 
+function showHub() {
+    hubSection.classList.remove('hidden');
+    setupSection.classList.add('hidden');
+    dashboardSection.classList.add('hidden');
+    hubBtn.classList.add('hidden'); // Already on Hub
+
+    // Unset active tournament so a refresh stays on the Hub
+    tournament.data = null;
+    tournament.tournamentId = null;
+    localStorage.removeItem('tournamentId');
+
+    // Clear URL query param if present
+    if (window.location.search.includes('tournament_id')) {
+        const url = new URL(window.location);
+        url.searchParams.delete('tournament_id');
+        window.history.replaceState({}, '', url);
+    }
+
+    fetchTournaments();
+}
+
 function showDashboard() {
+    hubSection.classList.add('hidden');
     setupSection.classList.add('hidden');
     dashboardSection.classList.remove('hidden');
+    hubBtn.classList.remove('hidden');
     updateDashboard();
 }
 
@@ -1706,76 +1729,103 @@ async function changeJudgeAssignment(matchId) {
     await unassignJudge(matchId);
 };
 
-// Tournament Selection Logic
-async function fetchTournaments() {
-    if (!tournament.backendUrl) return;
+// Hub Navigation Logic
+if (hubBtn) {
+    hubBtn.addEventListener('click', () => {
+        showHub();
+    });
+}
 
+newTournamentHubBtn.addEventListener('click', () => {
+    const newId = prompt("Enter a unique ID for the new tournament (no spaces, e.g., 'spring-2026'):");
+    if (newId && newId.trim()) {
+        const cleanId = newId.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+        tournament.setTournamentId(cleanId);
+        tournament.data = null; // Clear existing data for fresh setup
+        showSetup();
+        fetchTournaments(); // Refresh hub in background
+    }
+});
+
+async function fetchTournaments() {
+    let cloudTournaments = [];
+    let localTournaments = getLocalTournaments();
+
+    // Try to fetch from cloud first
     try {
-        const response = await fetch(`${tournament.backendUrl}/api/tournaments`);
+        const url = `${tournament.backendUrl || 'http://localhost:8081'}/api/tournaments`;
+        const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
         if (response.ok) {
             const result = await response.json();
-            populateTournamentSelect(result.tournaments);
+            cloudTournaments = result.tournaments || [];
         }
     } catch (e) {
-        console.error("Failed to fetch tournaments:", e);
+        console.warn("Could not fetch tournaments from backend:", e.message);
+    }
+
+    // Merge lists and remove duplicates
+    const allTournaments = [...new Set([...cloudTournaments, ...localTournaments])];
+
+    if (tournamentHubGrid) {
+        renderHubGrid(allTournaments);
     }
 }
 
-function populateTournamentSelect(tournaments) {
-    if (!tournamentSelect) return;
+function getLocalTournaments() {
+    const ids = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key.startsWith('tournamentData_')) {
+            const id = key.replace('tournamentData_', '');
+            if (id && id !== 'undefined' && id !== 'null') {
+                ids.push(id);
+            }
+        }
+    }
+    // Also include the legacy 'tournamentData' if it exists and isn't already found
+    if (localStorage.getItem('tournamentData') && !ids.includes('default')) {
+        ids.push('default');
+    }
+    return ids;
+}
 
-    // Clear list
-    tournamentSelect.innerHTML = '';
+function renderHubGrid(tournaments) {
+    if (!tournamentHubGrid) return;
+    tournamentHubGrid.innerHTML = '';
 
-    // Ensure current is in list
-    if (!tournaments.includes(tournament.tournamentId)) {
-        tournaments.push(tournament.tournamentId);
+    if (!tournaments || tournaments.length === 0) {
+        tournamentHubGrid.innerHTML = '<div class="loading-placeholder">No tournaments found. Create one to get started!</div>';
+        return;
     }
 
     tournaments.sort().forEach(id => {
-        const opt = document.createElement('option');
-        opt.value = id;
-        opt.textContent = id;
-        tournamentSelect.appendChild(opt);
-    });
+        const card = document.createElement('div');
+        card.className = 'tournament-card';
 
-    tournamentSelect.value = tournament.tournamentId;
-}
+        // Visual indicator if active
+        if (id === tournament.tournamentId && tournament.data) {
+            card.style.borderColor = 'var(--primary)';
+            card.style.background = 'rgba(79, 70, 229, 0.05)';
+        }
 
-if (tournamentSelect) {
-    tournamentSelect.addEventListener('change', async (e) => {
-        const newId = e.target.value;
-        if (newId === tournament.tournamentId) return;
-
-        showLoading(`Switching to tournament ${newId}...`);
-        tournament.setTournamentId(newId);
-        await tournament.loadFromStorage();
-        initUI();
-        hideLoading();
-    });
-}
-
-if (newTournamentBtn) {
-    newTournamentBtn.addEventListener('click', async () => {
-        const newId = prompt("Enter a unique ID for the new tournament (no spaces, e.g., 'spring-2026'):");
-        if (newId && newId.trim()) {
-            const cleanId = newId.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
-            tournament.setTournamentId(cleanId);
-
-            showLoading(`Preparing new tournament ${cleanId}...`);
+        card.innerHTML = `
+            <div class="tournament-id">${id}</div>
+            <h3>${id.replace(/-/g, ' ').toUpperCase()}</h3>
+            <div class="tournament-meta">
+                <span>Manage Tournament →</span>
+            </div>
+        `;
+        card.onclick = async () => {
+            showLoading(`Loading ${id}...`);
             try {
-                // This will clear previous data and try to fetch (will likely be null)
+                tournament.setTournamentId(id);
                 await tournament.loadFromStorage();
                 await initUI();
             } finally {
                 hideLoading();
             }
-
-            // Refresh tournament list to include new one if backend is connected
-            if (tournament.backendUrl) {
-                fetchTournaments();
-            }
-        }
+        };
+        tournamentHubGrid.appendChild(card);
     });
 }
 

@@ -1125,3 +1125,65 @@ header h1 {
 #syncIndicator.sync-complete {
     border-color: #10b981;
 }
+
+/* Hub Styles */
+.hub-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.hub-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+}
+
+.tournament-card {
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.tournament-card:hover {
+    border-color: var(--primary);
+    transform: translateY(-4px);
+    box-shadow: 0 10px 25px rgba(79, 70, 229, 0.2);
+}
+
+.tournament-card .tournament-id {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-family: monospace;
+    text-transform: uppercase;
+}
+
+.tournament-card h3 {
+    font-size: 1.25rem;
+    color: var(--text);
+    margin: 0;
+}
+
+.tournament-card .tournament-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.loading-placeholder {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
