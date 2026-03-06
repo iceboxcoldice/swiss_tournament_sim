@@ -1,0 +1,15 @@
+{
+  "paradigm": "testa \n\n\ntest \n\n\ntest \n\n\ntest test 3",
+  "history": [
+    {
+      "tournament_id": "tfa4",
+      "tournament_name": "tfa4",
+      "match_id": 3,
+      "round_num": 1,
+      "aff_name": "Team 4",
+      "neg_name": "Team 6",
+      "result": "A",
+      "date": ""
+    }
+  ]
+}

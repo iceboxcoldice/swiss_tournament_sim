@@ -26,10 +26,12 @@ class Team {
 }
 
 class Judge {
-    constructor(id, name, institution = '') {
+    constructor(id, name, institution = '', email = '', paradigm = '') {
         this.id = id;
         this.name = name;
         this.institution = institution || 'Tournament Hire';
+        this.email = email || '';
+        this.paradigm = paradigm || '';
         this.matches_judged = []; // Array of match IDs
     }
 }
@@ -53,6 +55,15 @@ class TournamentManager {
     enqueueSync(task) {
         this.syncQueue.push(task);
         this.processSyncQueue();
+    }
+
+    // Auth Token Helper
+    getAuthHeaders(baseHeaders = { 'Content-Type': 'application/json' }) {
+        const token = localStorage.getItem('googleAuthToken');
+        if (token) {
+            baseHeaders['Authorization'] = `Bearer ${token}`;
+        }
+        return baseHeaders;
     }
 
     // Process the sync queue in background
@@ -120,6 +131,7 @@ class TournamentManager {
             try {
                 const response = await fetch(`${effectiveBackendUrl}/api/t/${this.tournamentId}/data?_=${Date.now()}`, {
                     cache: 'no-store',
+                    headers: this.getAuthHeaders({}),
                     signal: AbortSignal.timeout(2000)
                 });
                 if (response.ok) {
@@ -169,7 +181,14 @@ class TournamentManager {
 
         // Reconstruct judges in data if necessary
         if (this.judges.length > 0) {
-            this.data.judges = this.judges.map(j => ({ id: j.id, name: j.name, institution: j.institution }));
+            this.data.judges = this.judges.map(j => ({
+                id: j.id,
+                name: j.name,
+                institution: j.institution,
+                email: j.email || '',
+                paradigm: j.paradigm || '',
+                matches_judged: j.matches_judged || []
+            }));
         }
 
         // Always save local backup with namespaced key
@@ -191,7 +210,26 @@ class TournamentManager {
 
         // Reconstruct judges if present
         if (this.data.judges) {
-            this.judges = this.data.judges.map(j => new Judge(j.id, j.name, j.institution));
+            this.judges = this.data.judges.map(j => {
+                const institution = j.institution || 'Tournament Hire';
+                const email = j.email || '';
+                const paradigm = j.paradigm || '';
+                const judge = new Judge(j.id, j.name, institution, email, paradigm);
+                Object.assign(judge, j);
+                // Ensure defaults aren't overwritten by null/empty from data
+                judge.institution = institution;
+                judge.email = email;
+                judge.paradigm = paradigm;
+                return judge;
+            });
+        }
+
+        // Ensure next_judge_id is tracked and NOT NaN
+        if (this.data.next_judge_id === undefined || isNaN(this.data.next_judge_id)) {
+            const maxId = (this.judges.length > 0)
+                ? Math.max(...this.judges.map(j => isNaN(j.id) ? 0 : j.id))
+                : 0;
+            this.data.next_judge_id = maxId + 1;
         }
     }
 
@@ -203,7 +241,7 @@ class TournamentManager {
             try {
                 const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/init`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: this.getAuthHeaders(),
                     body: JSON.stringify({
                         num_teams: numTeams,
                         rounds: numPrelimRounds,
@@ -217,7 +255,10 @@ class TournamentManager {
                     console.log('Backend init successful:', result);
 
                     // Reload full data from backend
-                    const dataResponse = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/data?_=${Date.now()}`, { cache: 'no-store' });
+                    const dataResponse = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/data?_=${Date.now()}`, {
+                        cache: 'no-store',
+                        headers: this.getAuthHeaders({})
+                    });
                     if (dataResponse.ok) {
                         const data = await dataResponse.json();
                         console.log('Fetched data from backend:', data);
@@ -281,7 +322,7 @@ class TournamentManager {
             try {
                 const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/pair`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: this.getAuthHeaders(),
                     body: JSON.stringify({ round: roundNum })
                 });
 
@@ -366,7 +407,8 @@ class TournamentManager {
     }
 
     // Add a new judge
-    async addJudge(name, institution = '') {
+    async addJudge(name, institution = '', email = '') {
+        console.log(`[addJudge] called with name='${name}', institution='${institution}', email='${email}'`);
         if (!name || name.trim() === '') {
             throw new Error('Judge name is required');
         }
@@ -376,8 +418,17 @@ class TournamentManager {
             throw new Error(`Judge with name "${name}" already exists`);
         }
 
+        // Ensure next_judge_id is ready and NOT NaN
+        if (this.data.next_judge_id === undefined || isNaN(this.data.next_judge_id)) {
+            const maxId = (this.judges.length > 0)
+                ? Math.max(...this.judges.map(j => isNaN(j.id) ? 0 : j.id))
+                : 0;
+            this.data.next_judge_id = maxId + 1;
+        }
+
         // 1. Create locally first
-        const judge = new Judge(this.data.next_judge_id++, name.trim(), institution.trim());
+        const judge = new Judge(this.data.next_judge_id++, name.trim(), institution.trim(), email.trim());
+        console.log(`[addJudge] created Judge object:`, JSON.stringify(judge));
         this.judges.push(judge);
         this.saveToStorage();
 
@@ -386,11 +437,14 @@ class TournamentManager {
             this.enqueueSync(async () => {
                 const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/judge`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: name.trim(), institution: institution.trim() })
-                });
-
-                if (response.ok) {
+                    headers: this.getAuthHeaders(),
+                    body: JSON.stringify({
+                        action: 'add',
+                        name: name.trim(),
+                        institution: institution.trim(),
+                        email: email.trim()
+                    })
+                }); if (response.ok) {
                     const result = await response.json();
                     // Update the temporary ID with the real ID from backend if different
                     // Actually, our local ID management should be consistent with backend,
@@ -427,7 +481,7 @@ class TournamentManager {
             this.enqueueSync(async () => {
                 const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/judge`, {
                     method: 'DELETE',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: this.getAuthHeaders(),
                     body: JSON.stringify({ judge_id: judgeId })
                 });
 
@@ -437,6 +491,84 @@ class TournamentManager {
                 }
             });
         }
+    }
+
+    // Update a judge's paradigm
+    async updateJudgeParadigm(judgeId, paradigm) {
+        const judge = this.judges.find(j => j.id === judgeId);
+        if (!judge) {
+            throw new Error(`Judge ${judgeId} not found`);
+        }
+
+        // 1. Update locally
+        judge.paradigm = paradigm;
+        this.saveToStorage();
+
+        // 2. Enqueue Sync
+        if (this.backendUrl) {
+            this.enqueueSync(async () => {
+                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/judge_paradigm`, {
+                    method: 'POST',
+                    headers: this.getAuthHeaders(),
+                    body: JSON.stringify({ judge_id: judgeId, paradigm: paradigm })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Backend paradigm update failed');
+                }
+            });
+        }
+    }
+
+    // Global Profile Helpers (Paradigm + History)
+    async fetchJudgeProfile(email) {
+        if (!this.backendUrl || !email) return { paradigm: "", history: [] };
+        try {
+            const response = await fetch(`${this.backendUrl}/api/judge_profile/${encodeURIComponent(email)}`);
+            if (response.ok) {
+                return await response.json();
+            }
+        } catch (e) {
+            console.error("Error fetching judge profile:", e);
+        }
+        return { paradigm: "", history: [] };
+    }
+
+    async updateJudgeParadigm(paradigm) {
+        if (!this.backendUrl) throw new Error("Backend not connected");
+
+        const response = await fetch(`${this.backendUrl}/api/judge_profile`, {
+            method: 'POST',
+            headers: this.getAuthHeaders(),
+            body: JSON.stringify({ paradigm })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || "Failed to update global paradigm");
+        }
+        return true;
+    }
+
+    async closeTournament() {
+        if (!this.backendUrl) throw new Error("Backend not connected");
+
+        const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/close`, {
+            method: 'POST',
+            headers: this.getAuthHeaders()
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || "Failed to close tournament");
+        }
+
+        const result = await response.json();
+        // Update local state
+        this.data.is_closed = true;
+        this.saveToStorage();
+        return result;
     }
 
     // Assign a judge to a match
@@ -465,7 +597,7 @@ class TournamentManager {
             this.enqueueSync(async () => {
                 const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/assign_judge`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: this.getAuthHeaders(),
                     body: JSON.stringify({ match_id: matchId, judge_id: judgeId })
                 });
 
@@ -493,9 +625,9 @@ class TournamentManager {
             // 2. Enqueue Sync
             if (this.backendUrl) {
                 this.enqueueSync(async () => {
-                    const response = await fetch(`${this.backendUrl}/api/assign_judge`, {
+                    const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/assign_judge`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: this.getAuthHeaders(),
                         body: JSON.stringify({ match_id: matchId, judge_id: null })
                     });
 
@@ -866,7 +998,7 @@ class TournamentManager {
             this.enqueueSync(async () => {
                 const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/report`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: this.getAuthHeaders(),
                     body: JSON.stringify({
                         match_id: matchId,
                         result: outcome,
@@ -894,6 +1026,11 @@ class TournamentManager {
         }
 
         match.result = newOutcome;
+
+        // Store new speaker points if provided BEFORE any other processing
+        if (speakerPoints) {
+            this.storeSpeakerPoints(matchId, speakerPoints, true); // true = skipSync
+        }
 
         // Update result file content: Comment out old lines for this match
         if (this.data.result_file_content === undefined || this.data.result_file_content === null) {
@@ -923,9 +1060,6 @@ class TournamentManager {
             const pointsToLog = speakerPoints || match.speaker_points;
 
             if (pointsToLog) {
-                if (speakerPoints) {
-                    this.storeSpeakerPoints(matchId, speakerPoints, true); // true = skipSync
-                }
                 const sp = pointsToLog;
                 const a1 = sp.affPoints[0] !== null ? sp.affPoints[0] : "null";
                 const a2 = sp.affPoints[1] !== null ? sp.affPoints[1] : "null";
@@ -946,7 +1080,7 @@ class TournamentManager {
             this.enqueueSync(async () => {
                 const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/report`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: this.getAuthHeaders(),
                     body: JSON.stringify({
                         match_id: matchId,
                         result: newOutcome,
@@ -1183,12 +1317,8 @@ class TournamentManager {
                 this.enqueueSync(async () => {
                     const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/report`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            match_id: matchId,
-                            result: match.result,
-                            speaker_points: speakerPoints
-                        })
+                        headers: this.getAuthHeaders(),
+                        body: JSON.stringify({ match_id: matchId, result: match.result, speaker_points: speakerPoints })
                     });
                     if (!response.ok) {
                         const err = await response.json();
@@ -1344,7 +1474,8 @@ class TournamentManager {
 
         // Import judges (migration: handle old tournaments without judges)
         this.judges = (data.judges || []).map(j => {
-            const judge = new Judge(j.id, j.name, j.institution);
+            const institution = j.institution || 'Tournament Hire';
+            const judge = new Judge(j.id, j.name, institution, j.email);
             judge.matches_judged = j.matches_judged || [];
             return judge;
         });
@@ -1358,7 +1489,7 @@ class TournamentManager {
             try {
                 const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/reset`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
+                    headers: this.getAuthHeaders()
                 });
                 if (!response.ok) {
                     console.error("Reset response error:", response.status);

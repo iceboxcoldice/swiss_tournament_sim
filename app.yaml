@@ -1,5 +1,9 @@
-runtime: python310
+runtime: python311
 entrypoint: gunicorn -b :$PORT main:app
+
+env_variables:
+  GCS_BUCKET_NAME: "swiss-tournament-data"
+  GOOGLE_OAUTH_CLIENT_ID: "1040110950776-lp97tkf0bhc36c8s3v405c46hhf0m53m.apps.googleusercontent.com"
 
 handlers:
   - url: /.*

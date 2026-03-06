@@ -1,0 +1,464 @@
+{
+  "config": {
+    "num_teams": 8,
+    "num_prelim_rounds": 4,
+    "num_elim_rounds": 0,
+    "num_rounds": 4
+  },
+  "current_round": 2,
+  "rounds": [
+    [
+      1,
+      2,
+      3,
+      4
+    ],
+    [
+      5,
+      6,
+      7,
+      8
+    ]
+  ],
+  "teams": [
+    {
+      "id": 2,
+      "true_rank": 0,
+      "name": "Team 3",
+      "score": 1.0,
+      "buchholz": 0.0,
+      "wins": 1,
+      "aff_count": 1,
+      "neg_count": 0,
+      "last_side": "Aff",
+      "side_history": {
+        "1": [
+          "Aff"
+        ]
+      },
+      "history": [
+        "W"
+      ],
+      "opponent_history": [
+        1
+      ],
+      "break_seed": null,
+      "members": [
+        {
+          "name": "Member 1"
+        },
+        {
+          "name": "Member 2"
+        }
+      ],
+      "institution": "Unknown",
+      "speaker_points_history": []
+    },
+    {
+      "id": 6,
+      "true_rank": 0,
+      "name": "Team 7",
+      "score": 1.0,
+      "buchholz": 0.0,
+      "wins": 1,
+      "aff_count": 0,
+      "neg_count": 1,
+      "last_side": "Neg",
+      "side_history": {
+        "4": [
+          "Neg"
+        ]
+      },
+      "history": [
+        "W"
+      ],
+      "opponent_history": [
+        4
+      ],
+      "break_seed": null,
+      "members": [
+        {
+          "name": "Member 1"
+        },
+        {
+          "name": "Member 2"
+        }
+      ],
+      "institution": "Unknown",
+      "speaker_points_history": []
+    },
+    {
+      "id": 3,
+      "true_rank": 0,
+      "name": "Team 4",
+      "score": 1.0,
+      "buchholz": 0.0,
+      "wins": 1,
+      "aff_count": 1,
+      "neg_count": 0,
+      "last_side": "Aff",
+      "side_history": {
+        "5": [
+          "Aff"
+        ]
+      },
+      "history": [
+        "W"
+      ],
+      "opponent_history": [
+        5
+      ],
+      "break_seed": null,
+      "members": [
+        {
+          "name": "Member 1"
+        },
+        {
+          "name": "Member 2"
+        }
+      ],
+      "institution": "Unknown",
+      "speaker_points_history": [
+        {
+          "round": 1,
+          "points": [
+            14,
+            23
+          ]
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "true_rank": 0,
+      "name": "Team 8",
+      "score": 1.0,
+      "buchholz": 0.0,
+      "wins": 1,
+      "aff_count": 1,
+      "neg_count": 0,
+      "last_side": "Aff",
+      "side_history": {
+        "0": [
+          "Aff"
+        ]
+      },
+      "history": [
+        "W"
+      ],
+      "opponent_history": [
+        0
+      ],
+      "break_seed": null,
+      "members": [
+        {
+          "name": "Member 1"
+        },
+        {
+          "name": "Member 2"
+        }
+      ],
+      "institution": "Unknown",
+      "speaker_points_history": []
+    },
+    {
+      "id": 1,
+      "true_rank": 0,
+      "name": "Team 2",
+      "score": 0.0,
+      "buchholz": 1.0,
+      "wins": 0,
+      "aff_count": 0,
+      "neg_count": 1,
+      "last_side": "Neg",
+      "side_history": {
+        "2": [
+          "Neg"
+        ]
+      },
+      "history": [
+        "L"
+      ],
+      "opponent_history": [
+        2
+      ],
+      "break_seed": null,
+      "members": [
+        {
+          "name": "Member 1"
+        },
+        {
+          "name": "Member 2"
+        }
+      ],
+      "institution": "Unknown",
+      "speaker_points_history": []
+    },
+    {
+      "id": 4,
+      "true_rank": 0,
+      "name": "Team 5",
+      "score": 0.0,
+      "buchholz": 1.0,
+      "wins": 0,
+      "aff_count": 1,
+      "neg_count": 0,
+      "last_side": "Aff",
+      "side_history": {
+        "6": [
+          "Aff"
+        ]
+      },
+      "history": [
+        "L"
+      ],
+      "opponent_history": [
+        6
+      ],
+      "break_seed": null,
+      "members": [
+        {
+          "name": "Member 1"
+        },
+        {
+          "name": "Member 2"
+        }
+      ],
+      "institution": "Unknown",
+      "speaker_points_history": []
+    },
+    {
+      "id": 5,
+      "true_rank": 0,
+      "name": "Team 6",
+      "score": 0.0,
+      "buchholz": 1.0,
+      "wins": 0,
+      "aff_count": 0,
+      "neg_count": 1,
+      "last_side": "Neg",
+      "side_history": {
+        "3": [
+          "Neg"
+        ]
+      },
+      "history": [
+        "L"
+      ],
+      "opponent_history": [
+        3
+      ],
+      "break_seed": null,
+      "members": [
+        {
+          "name": "Member 1"
+        },
+        {
+          "name": "Member 2"
+        }
+      ],
+      "institution": "Unknown",
+      "speaker_points_history": [
+        {
+          "round": 1,
+          "points": [
+            23,
+            30
+          ]
+        }
+      ]
+    },
+    {
+      "id": 0,
+      "true_rank": 0,
+      "name": "Team 1",
+      "score": 0.0,
+      "buchholz": 1.0,
+      "wins": 0,
+      "aff_count": 0,
+      "neg_count": 1,
+      "last_side": "Neg",
+      "side_history": {
+        "7": [
+          "Neg"
+        ]
+      },
+      "history": [
+        "L"
+      ],
+      "opponent_history": [
+        7
+      ],
+      "break_seed": null,
+      "members": [
+        {
+          "name": "Member 1"
+        },
+        {
+          "name": "Member 2"
+        }
+      ],
+      "institution": "Unknown",
+      "speaker_points_history": []
+    }
+  ],
+  "matches": [
+    {
+      "match_id": 1,
+      "round_num": 1,
+      "aff_id": 2,
+      "neg_id": 1,
+      "aff_name": "Team 3",
+      "neg_name": "Team 2",
+      "result": "A",
+      "judge_id": 1,
+      "speaker_points": null
+    },
+    {
+      "match_id": 2,
+      "round_num": 1,
+      "aff_id": 4,
+      "neg_id": 6,
+      "aff_name": "Team 5",
+      "neg_name": "Team 7",
+      "result": "N",
+      "judge_id": -1,
+      "speaker_points": null
+    },
+    {
+      "match_id": 3,
+      "round_num": 1,
+      "aff_id": 3,
+      "neg_id": 5,
+      "aff_name": "Team 4",
+      "neg_name": "Team 6",
+      "result": "A",
+      "judge_id": 6,
+      "speaker_points": {
+        "affPoints": [
+          14,
+          23
+        ],
+        "negPoints": [
+          23,
+          30
+        ]
+      }
+    },
+    {
+      "match_id": 4,
+      "round_num": 1,
+      "aff_id": 7,
+      "neg_id": 0,
+      "aff_name": "Team 8",
+      "neg_name": "Team 1",
+      "result": "A",
+      "judge_id": -1,
+      "speaker_points": null
+    },
+    {
+      "match_id": 5,
+      "round_num": 2,
+      "aff_id": 7,
+      "neg_id": 2,
+      "aff_name": "Team 8",
+      "neg_name": "Team 3",
+      "result": null,
+      "judge_id": -1,
+      "speaker_points": null
+    },
+    {
+      "match_id": 6,
+      "round_num": 2,
+      "aff_id": 1,
+      "neg_id": 4,
+      "aff_name": "Team 2",
+      "neg_name": "Team 5",
+      "result": null,
+      "judge_id": -1,
+      "speaker_points": null
+    },
+    {
+      "match_id": 7,
+      "round_num": 2,
+      "aff_id": 0,
+      "neg_id": 3,
+      "aff_name": "Team 1",
+      "neg_name": "Team 4",
+      "result": null,
+      "judge_id": -1,
+      "speaker_points": null
+    },
+    {
+      "match_id": 8,
+      "round_num": 2,
+      "aff_id": 5,
+      "neg_id": 6,
+      "aff_name": "Team 6",
+      "neg_name": "Team 7",
+      "result": null,
+      "judge_id": -1,
+      "speaker_points": null
+    }
+  ],
+  "next_match_id": 9,
+  "tournament_id": "tfa4",
+  "auth": {
+    "admins": [
+      "hanbing.liu@gmail.com"
+    ],
+    "judges": {
+      "6": "coldice@gmail.com"
+    }
+  },
+  "judges": [
+    {
+      "id": 1,
+      "name": "coldice",
+      "institution": "Tournament Hire",
+      "email": "",
+      "matches_judged": [
+        1
+      ]
+    },
+    {
+      "id": 2,
+      "name": "yaoyao",
+      "institution": "Tournament Hire",
+      "email": "",
+      "matches_judged": []
+    },
+    {
+      "id": 3,
+      "name": "test2",
+      "institution": "Tournament Hire",
+      "email": "",
+      "matches_judged": []
+    },
+    {
+      "id": 4,
+      "name": "hanbing",
+      "institution": "Tournament Hire",
+      "email": "",
+      "matches_judged": []
+    },
+    {
+      "id": 5,
+      "name": "ttest",
+      "institution": "eqtq",
+      "email": "",
+      "matches_judged": []
+    },
+    {
+      "id": 6,
+      "name": "qerq",
+      "institution": "qwrq",
+      "email": "coldice@gmail.com",
+      "matches_judged": [
+        3
+      ]
+    }
+  ],
+  "next_judge_id": 7,
+  "is_closed": true
+}

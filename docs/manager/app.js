@@ -57,6 +57,101 @@ tournament.onSyncStatusChange = (isSyncing) => {
         }, 2000);
     }
 };
+// Auth State Management
+let currentUser = null;
+
+function getUserRole() {
+    // Local mode always has full access
+    if (!tournament.backendUrl) return 'admin';
+
+    if (!currentUser) return 'public';
+
+    const authData = tournament?.data?.auth;
+    if (!authData) return 'public';
+
+    const userEmail = currentUser?.email;
+    if (!userEmail) return 'public';
+    const email = userEmail.toLowerCase();
+
+    // Admin check
+    if (authData.admins) {
+        if (authData.admins.some(a => a.toLowerCase() === email)) return 'admin';
+    }
+
+    // Judge check
+    if (authData.judges) {
+        for (const [id, j_email] of Object.entries(authData.judges)) {
+            if (j_email.toLowerCase() === email) return 'judge';
+        }
+    }
+
+    return 'participant';
+}
+
+function parseJwt(token) {
+    try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(atob(base64).split('').map(function (c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        return JSON.parse(jsonPayload);
+    } catch (e) {
+        return null;
+    }
+}
+
+function updateAuthUI() {
+    const signInBtn = document.querySelector('.g_id_signin');
+    const userProfile = document.getElementById('user-profile');
+    const userName = document.getElementById('user-name');
+    const userAvatar = document.getElementById('user-avatar');
+
+    if (currentUser) {
+        if (signInBtn) signInBtn.style.display = 'none';
+        if (userProfile) {
+            userProfile.style.display = 'flex';
+            userName.innerText = currentUser.name;
+            userAvatar.src = currentUser.picture;
+        }
+    } else {
+        if (signInBtn) signInBtn.style.display = 'block';
+        if (userProfile) userProfile.style.display = 'none';
+
+        // Render Google button if library is loaded but button is empty
+        if (typeof google !== 'undefined' && signInBtn && signInBtn.innerHTML === '') {
+            google.accounts.id.renderButton(signInBtn, { theme: 'outline', size: 'medium' });
+        }
+    }
+}
+
+function handleCredentialResponse(response) {
+    const token = response.credential;
+    localStorage.setItem('googleAuthToken', token);
+    currentUser = parseJwt(token);
+    updateAuthUI();
+    // Refresh current view to apply role-based access
+    initUI();
+}
+
+function signOut() {
+    localStorage.removeItem('googleAuthToken');
+    currentUser = null;
+    updateAuthUI();
+    initUI();
+}
+
+// Check for existing token on load
+const existingToken = localStorage.getItem('googleAuthToken');
+if (existingToken) {
+    currentUser = parseJwt(existingToken);
+    // If token is invalid/expired, clear it
+    if (!currentUser || (currentUser.exp * 1000) < Date.now()) {
+        signOut();
+    } else {
+        updateAuthUI();
+    }
+}
 
 // Listen for sync completion to refresh UI if needed
 window.addEventListener('tournamentSyncComplete', () => {
@@ -291,7 +386,8 @@ if (saveBackendBtn) {
 function updateConnectionStatus(connected) {
     if (connectionStatus) {
         if (connected) {
-            connectionStatus.textContent = 'Cloud Connected';
+            const urlText = tournament.backendUrl ? `: ${tournament.backendUrl}` : '';
+            connectionStatus.textContent = `Cloud Connected${urlText}`;
             connectionStatus.className = 'text-green-500 text-sm font-medium';
         } else {
             connectionStatus.textContent = 'Local Mode';
@@ -365,6 +461,29 @@ resetBtn.addEventListener('click', () => {
         }
     );
 });
+
+// Close Tournament Handler
+const closeTournamentBtnEl = document.getElementById('closeTournamentBtn');
+if (closeTournamentBtnEl) {
+    closeTournamentBtnEl.addEventListener('click', () => {
+        showConfirm(
+            'Close Tournament',
+            'Are you sure you want to close this tournament? This will commit all judge match records to their global profiles and mark the tournament as finished. This action is final.',
+            async () => {
+                showLoading("Closing tournament...");
+                try {
+                    const result = await tournament.closeTournament();
+                    showNotification("Success", result.message || "Tournament closed successfully!");
+                    updateDashboard();
+                } catch (e) {
+                    showNotification("Error", e.message);
+                } finally {
+                    hideLoading();
+                }
+            }
+        );
+    });
+}
 
 // Close modal when clicking outside
 confirmModal.addEventListener('click', (e) => {
@@ -443,10 +562,45 @@ function updateDashboard() {
     const roundsText = num_elim_rounds > 0
         ? `${num_prelim_rounds} prelim + ${num_elim_rounds} elim rounds`
         : `${num_rounds} rounds`;
-    tournamentInfo.textContent = `${num_teams} teams • ${roundsText} • Current: Round ${current_round}`;
 
+    const tournamentName = tournament.tournamentId
+        ? tournament.tournamentId.replace(/-/g, ' ').toUpperCase()
+        : 'Tournament';
+
+    let adminStr = '';
+    if (tournament.data.auth && tournament.data.auth.admins && tournament.data.auth.admins.length > 0) {
+        adminStr = ` • Admin: ${tournament.data.auth.admins[0].toLowerCase()}`;
+    }
+
+    let closedStr = tournament.data.is_closed ? ' <span class="closed-badge" style="background:#ef4444; color:white; padding:0.1rem 0.4rem; border-radius:3px; font-size:0.7rem; vertical-align:middle; text-transform:uppercase; margin-left:0.5rem; font-weight:600;">Closed</span>' : '';
+    tournamentInfo.innerHTML = `${tournamentName} — ${num_teams} teams • ${roundsText} • Current: Round ${current_round}${adminStr}${closedStr}`;
     // Render tabs
     renderTabs();
+
+    // Toggle header buttons based on role
+    const role = getUserRole();
+    const importBtnEl = document.getElementById('importBtn');
+    const backendConfigBtnEl = document.getElementById('backendConfigBtn');
+
+    const closeTournamentBtnEl = document.getElementById('closeTournamentBtn');
+    const resetBtnEl = document.getElementById('resetBtn');
+    if (role === 'admin') {
+        if (importBtnEl) importBtnEl.style.display = 'inline-block';
+        if (backendConfigBtnEl) backendConfigBtnEl.style.display = 'inline-block';
+
+        if (tournament.data.is_closed) {
+            if (closeTournamentBtnEl) closeTournamentBtnEl.style.display = 'none';
+            if (resetBtnEl) resetBtnEl.style.display = 'none';
+        } else {
+            if (closeTournamentBtnEl) closeTournamentBtnEl.style.display = 'inline-block';
+            if (resetBtnEl) resetBtnEl.style.display = 'inline-block';
+        }
+    } else {
+        if (importBtnEl) importBtnEl.style.display = 'none';
+        if (backendConfigBtnEl) backendConfigBtnEl.style.display = 'none';
+        if (closeTournamentBtnEl) closeTournamentBtnEl.style.display = 'none';
+        if (resetBtnEl) resetBtnEl.style.display = 'none';
+    }
 }
 
 // Render Dynamic Tabs
@@ -491,13 +645,16 @@ function renderTabs() {
         mainTabs.appendChild(btn);
     }
 
-    // Create [+] button
-    const newRoundBtn = document.createElement('button');
-    newRoundBtn.className = 'tab-btn new-round-btn';
-    newRoundBtn.textContent = '+';
-    newRoundBtn.title = 'Generate Next Round';
-    newRoundBtn.onclick = handleNewRound;
-    mainTabs.appendChild(newRoundBtn);
+    // Create [+] button (Admin Only)
+    const role = getUserRole();
+    if (role === 'admin' && !tournament.data.is_closed) {
+        const newRoundBtn = document.createElement('button');
+        newRoundBtn.className = 'tab-btn new-round-btn';
+        newRoundBtn.textContent = '+';
+        newRoundBtn.title = 'Generate Next Round';
+        newRoundBtn.onclick = handleNewRound;
+        mainTabs.appendChild(newRoundBtn);
+    }
 
     // Create Standings tab
     const standingsBtn = document.createElement('button');
@@ -640,11 +797,31 @@ function showRound(roundNum, highlightMatchId = null) {
     const matches = tournament.getRoundMatches(roundNum);
     const isPrelimRound = roundNum <= num_prelim_rounds;
 
+    const role = getUserRole();
+    let myJudgeId = null;
+    if (role === 'judge' && tournament.data?.auth?.judges && currentUser) {
+        for (const [idStr, j_email] of Object.entries(tournament.data.auth.judges)) {
+            if (j_email === currentUser.email) {
+                myJudgeId = parseInt(idStr);
+                break;
+            }
+        }
+    }
+
     tabContent.innerHTML = `
         <div class="card">
-            <h3>${roundLabel} Pairings</h3>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3>${roundLabel} Pairings ${tournament.data.is_closed ? '<span class="closed-badge" style="background:#ef4444; color:white; padding:0.2rem 0.6rem; border-radius:4px; font-size:0.8rem; margin-left:1rem;">CLOSED</span>' : ''}</h3>
+                ${role === 'admin' ? `
+                <div>
+                    <button class="btn btn-secondary" onclick="exportPairings(${roundNum})" title="Export pairings as a CSV file to import into tabular software.">📥 Export CSV</button>
+                    ${!tournament.data.is_closed ? `<button class="btn btn-danger" onclick="confirmResetRound(${roundNum})" ${roundNum !== tournament.data.current_round ? 'disabled title="Only the current round can be reset."' : ''}>Reset Round</button>` : ''}
+                </div>
+                ` : ''}
+            </div>
             <div class="pairings-grid">
                 ${matches.map(m => {
+        const canEditMatch = !tournament.data.is_closed && (role === 'admin' || (role === 'judge' && m.judge_id === myJudgeId));
         const hasResult = m.result !== null;
 
         // Get team members for speaker points
@@ -667,7 +844,7 @@ function showRound(roundNum, highlightMatchId = null) {
                     <span class="member-name">
                         <a href="#" onclick="showTeamDetails(${teamId}, 'round${roundNum}'); return false;" class="team-link">${memberName}</a>
                     </span>
-                    ${isPrelimRound ? `
+                    ${isPrelimRound && canEditMatch ? `
                         ${!hasPoints ? `
                             <button class="btn btn-sm btn-success" onclick="showSpeakerPointInput('${matchId}', '${index}')" title="Add Speaker Points">+</button>
                         ` : `
@@ -686,7 +863,7 @@ function showRound(roundNum, highlightMatchId = null) {
                                 placeholder="0-30"
                                 onblur="submitSpeakerPoint('${matchId}', '${index}')">
                         </div>
-                    ` : ''}
+                    ` : (isPrelimRound && hasPoints ? `<span class="speaker-point-value">${points.toFixed(1)}</span>` : '')}
                 </div>
             `;
         };
@@ -723,18 +900,20 @@ function showRound(roundNum, highlightMatchId = null) {
                                         <span class="match-id">Match ${m.match_id}</span>
                                     </div>
                                     <div class="match-content">
-                                        ${!hasResult ? `
+                                        ${!hasResult ? (canEditMatch ? `
                                             <div class="result-buttons">
                                                 <button class="btn btn-success" onclick="reportResult(${m.match_id}, 'A')">Aff Wins</button>
                                                 <button class="btn btn-success" onclick="reportResult(${m.match_id}, 'N')">Neg Wins</button>
                                             </div>
-                                        ` : `
+                                        ` : '<div class="result-status"><div class="result-winner">Pending</div></div>') : `
                                             <div class="result-status">
                                                 <div class="result-winner">Winner: ${m.result === 'A' ? 'Aff' : 'Neg'}</div>
+                                                ${canEditMatch ? `
                                                 <div class="correction-buttons">
                                                     <button class="btn btn-sm btn-warning" onclick="correctResult(${m.match_id}, '${m.result}')" title="Switch Winner">✏</button>
                                                     <button class="btn btn-sm btn-danger" onclick="unsubmitResult(${m.match_id})" title="Unsubmit Result">✕</button>
                                                 </div>
+                                                ` : ''}
                                             </div>
                                         `}
                                         
@@ -752,9 +931,11 @@ function showRound(roundNum, highlightMatchId = null) {
                                                                 </a>
                                                                 (${assignedJudge.institution})
                                                             </span>
+                                                            ${role === 'admin' && !tournament.data.is_closed ? `
                                                             <button class="btn btn-sm btn-warning" onclick="changeJudgeAssignment(${m.match_id})" title="Change Judge">Change</button>
                                                             <button class="btn btn-sm btn-danger" onclick="unassignJudge(${m.match_id})" title="Unassign Judge">✕</button>
-                                                        ` : `
+                                                            ` : ''}
+                                                        ` : (role === 'admin' && !tournament.data.is_closed ? `
                                                             <div class="judge-autocomplete-container">
                                                                 <input type="text" 
                                                                     class="judge-search-input" 
@@ -768,7 +949,7 @@ function showRound(roundNum, highlightMatchId = null) {
                                                                 <div class="judge-results" id="judge_results_${m.match_id}"></div>
                                                             </div>
                                                             <button class="btn btn-sm btn-primary" onclick="assignJudge(${m.match_id})">Assign</button>
-                                                        `}
+                                                        ` : `<span style="color:var(--text-muted)">Unassigned</span>`)}
                                                     </div>
                                                 `;
             })()}
@@ -1005,11 +1186,13 @@ function showJudges() {
 
     const judges = tournament.judges;
 
+    const role = getUserRole();
+
     tabContent.innerHTML = `
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                 <h3>Judges</h3>
-                <button class="btn btn-primary" onclick="showAddJudgeForm()">+ Add Judge</button>
+                ${role === 'admin' && !tournament.data.is_closed ? '<button class="btn btn-primary" onclick="showAddJudgeForm()">+ Add Judge</button>' : ''}
             </div>
             <p class="text-muted">Total Judges: ${judges.length}</p>
             
@@ -1024,8 +1207,9 @@ function showJudges() {
                             <th>ID</th>
                             <th>Name</th>
                             <th>Institution</th>
+                            <th>Email</th>
                             <th>Matches Judged</th>
-                            <th>Actions</th>
+                            ${role === 'admin' ? '<th>Actions</th>' : ''}
                         </tr>
                     </thead>
                     <tbody>
@@ -1037,8 +1221,14 @@ function showJudges() {
                                         <strong>${judge.name}</strong>
                                     </a>
                                 </td>
-                                <td>${judge.institution}</td>
+                                <td>${judge.institution || 'Tournament Hire'}</td>
+                                <td class="judge-email-cell">
+                                    <span class="${judge.email ? 'text-dark' : 'text-muted'}" style="font-size: 0.9em; font-family: monospace;">
+                                        ${judge.email || '—'}
+                                    </span>
+                                </td>
                                 <td>${judge.matches_judged.length}</td>
+                                ${role === 'admin' ? `
                                 <td>
                                     <button 
                                         class="btn btn-sm btn-danger" 
@@ -1048,6 +1238,7 @@ function showJudges() {
                                         Delete
                                     </button>
                                 </td>
+                                ` : ''}
                             </tr>
                         `).join('')}
                     </tbody>
@@ -1055,6 +1246,9 @@ function showJudges() {
             `}
         </div>
 
+        </div>
+
+        ${role === 'admin' ? `
         <!-- Add Judge Form (hidden by default) -->
         <div id="addJudgeForm" class="card hidden" style="margin-top: 1rem;">
             <h4>Add New Judge</h4>
@@ -1067,12 +1261,17 @@ function showJudges() {
                     <label for="judgeInstitution">Institution</label>
                     <input type="text" id="judgeInstitution" placeholder="Leave blank for 'Tournament Hire'">
                 </div>
+                <div class="form-group">
+                    <label for="judgeEmail">Email Address</label>
+                    <input type="email" id="judgeEmail" placeholder="Judge's email for login account">
+                </div>
                 <div style="display: flex; gap: 1rem;">
                     <button type="submit" class="btn btn-primary">Add Judge</button>
                     <button type="button" class="btn btn-secondary" onclick="hideAddJudgeForm()">Cancel</button>
                 </div>
             </form>
         </div>
+        ` : ''}
     `;
 }
 
@@ -1622,41 +1821,7 @@ window.goBack = function () {
     }
 };
 
-// Judge Management Functions
-window.showAddJudgeForm = function () {
-    const form = document.getElementById('addJudgeForm');
-    if (form) {
-        form.classList.remove('hidden');
-        document.getElementById('judgeName').focus();
-    }
-};
-
-window.hideAddJudgeForm = function () {
-    const form = document.getElementById('addJudgeForm');
-    if (form) {
-        form.classList.add('hidden');
-        // Clear form fields
-        document.getElementById('judgeName').value = '';
-        document.getElementById('judgeInstitution').value = '';
-    }
-};
-
-async function submitAddJudge(event) {
-    if (event) event.preventDefault();
-    const nameInput = document.getElementById('judgeName');
-    const instInput = document.getElementById('judgeInstitution');
-    const name = nameInput.value.trim();
-    const institution = instInput.value.trim();
-
-    try {
-        await tournament.addJudge(name, institution);
-        hideAddJudgeForm();
-        showJudges();
-        showNotification('Success', `Judge "${name}" added successfully!`);
-    } catch (error) {
-        showNotification('Error', error.message);
-    }
-}
+// Note: Judge Management Functions are defined near the end of the file
 
 window.deleteJudge = function (judgeId) {
     const judge = tournament.judges.find(j => j.id === judgeId);
@@ -1770,8 +1935,38 @@ async function fetchTournaments() {
         console.warn("Could not fetch tournaments from backend:", e.message);
     }
 
-    // Merge lists and remove duplicates
-    const allTournaments = [...new Set([...cloudTournaments, ...localTournaments])];
+    // Merge lists. Determine unique IDs first to prevent duplicates.
+    const allTournaments = [];
+    const seenIds = new Set();
+
+    // Add cloud tournaments (now objects: {id, admins})
+    for (const t of cloudTournaments) {
+        // Handle backwards compatibility if it returns strings
+        const tId = typeof t === 'string' ? t : t.id;
+        if (!seenIds.has(tId)) {
+            seenIds.add(tId);
+            allTournaments.push(typeof t === 'string' ? { id: t, admins: [] } : t);
+        }
+    }
+
+    // Add local tournaments (strings) as fallback
+    for (const tId of localTournaments) {
+        if (!seenIds.has(tId)) {
+            seenIds.add(tId);
+            // We can try to peek at local storage to find the admin
+            let admins = [];
+            try {
+                const raw = localStorage.getItem(`tournamentData_${tId}`);
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    if (parsed.auth && parsed.auth.admins) {
+                        admins = parsed.auth.admins;
+                    }
+                }
+            } catch (e) { }
+            allTournaments.push({ id: tId, admins: admins });
+        }
+    }
 
     if (tournamentHubGrid) {
         renderHubGrid(allTournaments);
@@ -1805,36 +2000,70 @@ function renderHubGrid(tournaments) {
         return;
     }
 
-    tournaments.sort().forEach(id => {
-        const card = document.createElement('div');
-        card.className = 'tournament-card';
+    // Sort by id
+    tournaments.sort((a, b) => {
+        const idA = a.id || '';
+        const idB = b.id || '';
+        return idA.localeCompare(idB);
+    });
 
-        // Visual indicator if active
-        if (id === tournament.tournamentId && tournament.data) {
-            card.style.borderColor = 'var(--primary)';
-            card.style.background = 'rgba(79, 70, 229, 0.05)';
-        }
+    const active = tournaments.filter(t => !t.is_closed);
+    const closed = tournaments.filter(t => t.is_closed);
 
-        card.innerHTML = `
-            <div class="tournament-id">${id}</div>
-            <h3>${id.replace(/-/g, ' ').toUpperCase()}</h3>
-            <div class="tournament-meta">
-                <span>Manage Tournament →</span>
+    const renderSection = (title, list, isOpen = true) => {
+        if (list.length === 0) return '';
+
+        const sectionId = `hub-section-${title.toLowerCase()}`;
+        return `
+            <div class="hub-category">
+                <h2 style="margin: 2rem 0 1rem 0; padding-bottom: 0.5rem; border-bottom: 2px solid #eee; display: flex; justify-content: space-between; align-items: center;">
+                    ${title}
+                    <span style="font-size: 0.8rem; background: #eee; padding: 0.2rem 0.6rem; border-radius: 20px;">${list.length}</span>
+                </h2>
+                <div class="tournament-grid">
+                    ${list.map(t => {
+            const tId = t.id;
+            const admins = t.admins || [];
+            const adminDisplay = admins.length > 0
+                ? `<div class="text-muted" style="font-size: 0.85em; margin-top: 0.25rem;">👤 Admin: ${admins[0]}</div>`
+                : '';
+            const activeStyle = (tId === tournament.tournamentId && tournament.data)
+                ? 'border-color: var(--primary); background: rgba(79, 70, 229, 0.05);'
+                : '';
+
+            return `
+                            <div class="tournament-card" style="${activeStyle}" onclick="handleManageTournament('${tId}')">
+                                <div class="tournament-id">${tId}</div>
+                                <h3>${tId.replace(/-/g, ' ').toUpperCase()}</h3>
+                                ${adminDisplay}
+                                ${t.is_closed ? '<div style="margin-top: 0.5rem;"><span class="closed-badge" style="background:#6b7280; color:white; padding:0.1rem 0.4rem; border-radius:3px; font-size:0.7rem; text-transform:uppercase; font-weight:600;">Closed</span></div>' : ''}
+                                <div class="tournament-meta">
+                                    <span>${t.is_closed ? 'View Results' : 'Manage Tournament'} →</span>
+                                </div>
+                            </div>
+                        `;
+        }).join('')}
+                </div>
             </div>
         `;
-        card.onclick = async () => {
-            showLoading(`Loading ${id}...`);
-            try {
-                tournament.setTournamentId(id);
-                await tournament.loadFromStorage();
-                await initUI();
-            } finally {
-                hideLoading();
-            }
-        };
-        tournamentHubGrid.appendChild(card);
-    });
+    };
+
+    tournamentHubGrid.innerHTML = `
+        ${renderSection('Active Tournaments', active)}
+        ${renderSection('Closed Archive', closed)}
+    `;
 }
+
+window.handleManageTournament = async (tId) => {
+    showLoading(`Loading ${tId}...`);
+    try {
+        tournament.setTournamentId(tId);
+        await tournament.loadFromStorage();
+        await initUI();
+    } finally {
+        hideLoading();
+    }
+};
 
 
 // Handle browser back/forward navigation
@@ -1882,9 +2111,11 @@ window.submitAddJudge = async function (event) {
 
     const name = document.getElementById('judgeName').value.trim();
     const institution = document.getElementById('judgeInstitution').value.trim();
+    const emailInput = document.getElementById('judgeEmail');
+    const email = emailInput ? emailInput.value.trim() : '';
 
     try {
-        await tournament.addJudge(name, institution);
+        await tournament.addJudge(name, institution, email);
         hideAddJudgeForm(); // Hide form after successful add
         showJudges(); // Refresh the view
         showNotification('Success', `Judge "${name}" added successfully!`);
@@ -1912,7 +2143,37 @@ window.deleteJudge = function (judgeId) {
     );
 };
 
-window.showJudgeDetails = function (judgeId) {
+window.toggleParadigmEdit = function () {
+    const display = document.getElementById('paradigmDisplay');
+    const edit = document.getElementById('paradigmEdit');
+    if (display && edit) {
+        display.classList.toggle('hidden');
+        edit.classList.toggle('hidden');
+    }
+};
+
+window.saveParadigm = async function () {
+    const textarea = document.getElementById('paradigmTextarea');
+    const newParadigm = textarea.value.trim();
+
+    showLoading("Saving paradigm...");
+    try {
+        await tournament.updateGlobalParadigm(newParadigm);
+
+        // Update display
+        const display = document.getElementById('paradigmDisplay');
+        display.innerHTML = newParadigm || '<em class="text-muted">No paradigm provided yet.</em>';
+
+        toggleParadigmEdit();
+        showNotification("Success", "Global paradigm updated!");
+    } catch (e) {
+        showNotification("Error", e.message);
+    } finally {
+        hideLoading();
+    }
+};
+
+window.showJudgeDetails = async function (judgeId) {
     const judge = tournament.judges.find(j => j.id === judgeId);
     if (!judge) {
         showNotification('Error', 'Judge not found');
@@ -1930,7 +2191,19 @@ window.showJudgeDetails = function (judgeId) {
     // Update active state (no specific tab for judge details)
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
-    // Get matches this judge has judged
+    // Fetch Global Profile if email exists
+    let globalProfile = { paradigm: "", history: [] };
+    if (judge.email) {
+        globalProfile = await tournament.fetchJudgeProfile(judge.email);
+    }
+    const globalParadigm = globalProfile.paradigm || "";
+    const globalHistory = globalProfile.history || [];
+
+    // Can edit if current user email matches judge email
+    const canEdit = currentUser && currentUser.email && judge.email &&
+        currentUser.email.toLowerCase() === judge.email.toLowerCase();
+
+    // Get matches this judge has judged in THIS tournament
     const judgedMatches = tournament.data.matches.filter(m => m.judge_id === judgeId);
 
     tabContent.innerHTML = `
@@ -1945,9 +2218,34 @@ window.showJudgeDetails = function (judgeId) {
                     <div class="stat-value">${judge.institution}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Matches Judged</div>
+                    <div class="stat-label">Matches Judged (This Tournament)</div>
                     <div class="stat-value">${judge.matches_judged.length}</div>
                 </div>
+                <div class="stat-card">
+                    <div class="stat-label">Lifetime Record</div>
+                    <div class="stat-value">${globalHistory.length} rounds</div>
+                </div>
+            </div>
+
+            <div class="paradigm-section" style="margin-top: 2rem; padding: 1.5rem; background: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h4 style="margin: 0;">Judge Paradigm</h4>
+                    ${canEdit ? `<button class="btn btn-sm" onclick="toggleParadigmEdit()">Edit Paradigm</button>` : ''}
+                </div>
+                
+                <div id="paradigmDisplay" style="white-space: pre-wrap; font-size: 0.95em; line-height: 1.6; color: #374151;">
+                    ${globalParadigm || '<em class="text-muted">No paradigm provided yet.</em>'}
+                </div>
+
+                ${canEdit ? `
+                <div id="paradigmEdit" class="hidden">
+                    <textarea id="paradigmTextarea" class="form-control" style="width: 100%; min-height: 200px; margin-bottom: 1rem; font-family: inherit;">${globalParadigm}</textarea>
+                    <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+                        <button class="btn btn-secondary btn-sm" onclick="toggleParadigmEdit()">Cancel</button>
+                        <button class="btn btn-primary btn-sm" onclick="saveParadigm()">Save Paradigm</button>
+                    </div>
+                </div>
+                ` : ''}
             </div>
 
             ${judgedMatches.length > 0 ? `
@@ -1996,12 +2294,42 @@ window.showJudgeDetails = function (judgeId) {
                 </table>
             ` : `
                 <p class="text-muted" style="text-align:center; padding: 2rem;">
-                    This judge has not been assigned to any matches yet.
+                    This judge has not been assigned to any matches yet in this tournament.
                 </p>
             `}
+
+            ${globalHistory.length > 0 ? `
+                <h4 style="margin-top: 2rem; margin-bottom: 1rem;">Lifetime Judging Record</h4>
+                <div style="overflow-x: auto;">
+                    <table class="standings-table">
+                        <thead>
+                            <tr>
+                                <th>Tournament</th>
+                                <th>Round</th>
+                                <th>Aff Team</th>
+                                <th>Neg Team</th>
+                                <th>Decision</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${globalHistory.sort((a, b) => new Date(b.date) - new Date(a.date)).map(record => `
+                                <tr>
+                                    <td>${record.tournament_name || record.tournament_id}</td>
+                                    <td>${record.round_num}</td>
+                                    <td>${record.aff_name}</td>
+                                    <td>${record.neg_name}</td>
+                                    <td>${record.result === 'A' ? 'Aff' : record.result === 'N' ? 'Neg' : record.result}</td>
+                                    <td>${record.date || 'N/A'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            ` : ''}
         </div>
     `;
-};
+}
 
 
 

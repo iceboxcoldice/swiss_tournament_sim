@@ -24,6 +24,26 @@
                 </a>
             </div>
             <div class="header-actions">
+                <!-- Google Sign-In button or User Profile -->
+                <div id="auth-container" style="display:flex; align-items:center; gap:0.5rem; margin-right: 1rem;">
+                    <div id="g_id_onload"
+                        data-client_id="1040110950776-lp97tkf0bhc36c8s3v405c46hhf0m53m.apps.googleusercontent.com"
+                        data-context="signin" data-ux_mode="popup" data-callback="handleCredentialResponse"
+                        data-auto_prompt="false">
+                    </div>
+                    <div class="g_id_signin" data-type="standard" data-shape="rectangular" data-theme="outline"
+                        data-text="signin_with" data-size="medium" data-logo_alignment="left">
+                    </div>
+                    <!-- Profile Display (Hidden by default) -->
+                    <div id="user-profile" style="display:none; align-items:center; gap:0.5rem;">
+                        <img id="user-avatar" src="" alt="Avatar"
+                            style="width: 24px; height: 24px; border-radius: 50%;">
+                        <span id="user-name" style="font-size: 0.9em;"></span>
+                        <button class="btn btn-secondary" onclick="signOut()"
+                            style="padding: 0.2rem 0.5rem; font-size: 0.8em;">Sign Out</button>
+                    </div>
+                </div>
+
                 <button id="hubBtn" class="btn btn-secondary" title="Return to Tournament Hub">🏠 Hub</button>
                 <button id="exportBtn" class="btn btn-secondary">📥 Export</button>
                 <button id="importBtn" class="btn btn-secondary">📤 Import</button>
@@ -86,6 +106,8 @@
                 <h2>Tournament Dashboard</h2>
                 <div class="tournament-info">
                     <span id="tournamentInfo"></span>
+                    <button id="closeTournamentBtn" class="btn btn-primary" style="display: none;">Close
+                        Tournament</button>
                     <button id="resetBtn" class="btn btn-danger">Reset Tournament</button>
                 </div>
             </div>
@@ -154,8 +176,10 @@
         <span class="sync-text">Syncing with cloud...</span>
     </div>
 
-    <script src="tournament.js?v=15"></script>
-    <script src="app.js?v=15"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="tournament.js?v=17"></script>
+    <script src="app.js?v=17"></script>
 </body>
 
 </html>
