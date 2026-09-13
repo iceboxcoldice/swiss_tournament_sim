@@ -24,6 +24,19 @@ const hubBtn = document.getElementById('hubBtn');
 const newTournamentHubBtn = document.getElementById('newTournamentHubBtn');
 const tournamentHubGrid = document.getElementById('tournamentHubGrid');
 
+// Team Modal Elements
+const teamModal = document.getElementById('teamModal');
+const teamModalForm = document.getElementById('teamModalForm');
+const closeTeamModalBtn = document.getElementById('closeTeamModalBtn');
+const teamIdInput = document.getElementById('teamIdInput');
+const teamNameInput = document.getElementById('teamNameInput');
+const teamInstitutionInput = document.getElementById('teamInstitutionInput');
+const member1NameInput = document.getElementById('member1NameInput');
+const member1EmailInput = document.getElementById('member1EmailInput');
+const member2NameInput = document.getElementById('member2NameInput');
+const member2EmailInput = document.getElementById('member2EmailInput');
+const teamModalTitle = document.getElementById('teamModalTitle');
+
 let activeTab = null;
 let navigationHistory = []; // Track navigation history for back button
 
@@ -81,8 +94,13 @@ function getUserRole() {
     // Judge check
     if (authData.judges) {
         for (const [id, j_email] of Object.entries(authData.judges)) {
-            if (j_email.toLowerCase() === email) return 'judge';
+            if (j_email && j_email.toLowerCase() === email) return 'judge';
         }
+    }
+
+    // Coach check
+    if (authData.coaches) {
+        if (authData.coaches[email]) return 'coach';
     }
 
     return 'participant';
@@ -275,8 +293,8 @@ setupForm.addEventListener('submit', async (e) => {
                 name: parts[0] || `Team ${i + 1}`,
                 institution: parts[1] || 'Unknown',
                 members: [
-                    { name: parts[2] || `Member 1` },
-                    { name: parts[3] || `Member 2` }
+                    { name: parts[2] || `Member 1`, email: parts[3] || '' },
+                    { name: parts[4] || `Member 2`, email: parts[5] || '' }
                 ]
             });
         } else {
@@ -285,8 +303,8 @@ setupForm.addEventListener('submit', async (e) => {
                 name: `Team ${i + 1}`,
                 institution: 'Unknown',
                 members: [
-                    { name: `Member 1` },
-                    { name: `Member 2` }
+                    { name: `Member 1`, email: '' },
+                    { name: `Member 2`, email: '' }
                 ]
             });
         }
@@ -403,7 +421,7 @@ document.getElementById('autoPopulateBtn').addEventListener('click', () => {
 
     const lines = [];
     for (let i = 1; i <= numTeams; i++) {
-        lines.push(`Team ${i} | Institution ${i} | Member ${i}A | Member ${i}B`);
+        lines.push(`Team ${i} | Institution ${i} | Member ${i}A | participant${i}a@example.com | Member ${i}B | participant${i}b@example.com`);
     }
 
     teamDataTextarea.value = lines.join('\n');
@@ -600,6 +618,13 @@ function updateDashboard() {
         if (backendConfigBtnEl) backendConfigBtnEl.style.display = 'none';
         if (closeTournamentBtnEl) closeTournamentBtnEl.style.display = 'none';
         if (resetBtnEl) resetBtnEl.style.display = 'none';
+    }
+
+    if (role === 'coach') {
+        const institution = (tournament.data.auth && tournament.data.auth.coaches) ? tournament.data.auth.coaches[currentUser.email.toLowerCase()] : 'Unknown';
+        tournamentInfo.innerHTML += ` • <span style="color:var(--primary); font-weight:600">Coach (${institution})</span>`;
+    } else if (role === 'judge') {
+        tournamentInfo.innerHTML += ` • <span style="color:var(--primary); font-weight:600">Judge</span>`;
     }
 }
 
@@ -1135,9 +1160,17 @@ function showEntries() {
         showEntries();
     };
 
+    const role = getUserRole();
+    const isCoach = role === 'coach';
+    const isAdmin = role === 'admin';
+    const canRegister = (isAdmin || isCoach) && !tournament.data.is_closed;
+
     tabContent.innerHTML = `
         <div class="card">
-            <h3>Team Entries List</h3>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h3>Team Entries List</h3>
+                ${canRegister ? `<button class="btn btn-primary" onclick="showRegisterTeamForm()">+ Register Team</button>` : ''}
+            </div>
             <p class="text-muted">Total Teams: ${teams.length}</p>
             <table class="standings-table">
                 <thead>
@@ -1150,15 +1183,40 @@ function showEntries() {
                     </tr>
                 </thead>
                 <tbody>
-                    ${sortedTeams.map(team => `
-                        <tr>
+                    ${sortedTeams.map(team => {
+                        const isOwnInstitution = isCoach && team.institution === tournament.data.auth.coaches[currentUser.email.toLowerCase()];
+                        const rowStyle = isOwnInstitution ? 'background-color: rgba(79, 70, 229, 0.05);' : '';
+                        
+                        return `
+                        <tr style="${rowStyle}">
                             <td>${team.id}</td>
-                            <td><a href="#" onclick="showTeamDetails(${team.id}, 'entries'); return false;" class="team-link"><strong>${team.name}</strong></a></td>
+                            <td>
+                                <a href="#" onclick="showTeamDetails(${team.id}, 'entries'); return false;" class="team-link"><strong>${team.name}</strong></a>
+                                ${isOwnInstitution ? '<span class="badge" style="background:var(--primary); color:white; font-size:0.6rem; margin-left:0.5rem; padding:0.1rem 0.3rem; border-radius:3px;">MY TEAM</span>' : ''}
+                            </td>
                             <td>${team.institution || '—'}</td>
-                            <td><a href="#" onclick="showTeamDetails(${team.id}, 'entries'); return false;" class="team-link">${getMemberName(team.members[0])}</a></td>
-                            <td><a href="#" onclick="showTeamDetails(${team.id}, 'entries'); return false;" class="team-link">${getMemberName(team.members[1])}</a></td>
+                            <td>
+                                <div style="display:flex; flex-direction:column; gap:0.2rem">
+                                    <a href="#" onclick="showTeamDetails(${team.id}, 'entries'); return false;" class="team-link">${getMemberName(team.members[0])}</a>
+                                    ${team.members[0] && team.members[0].email ? `<a href="#" onclick="showUserProfile('${team.members[0].email}', '${getMemberName(team.members[0])}', '${team.institution}'); return false;" class="text-xs" style="color:var(--text-muted); text-decoration:none">View Profile</a>` : ''}
+                                </div>
+                            </td>
+                            <td>
+                                <div style="display:flex; flex-direction:column; gap:0.2rem">
+                                    <a href="#" onclick="showTeamDetails(${team.id}, 'entries'); return false;" class="team-link">${getMemberName(team.members[1])}</a>
+                                    ${team.members[1] && team.members[1].email ? `<a href="#" onclick="showUserProfile('${team.members[1].email}', '${getMemberName(team.members[1])}', '${team.institution}'); return false;" class="text-xs" style="color:var(--text-muted); text-decoration:none">View Profile</a>` : ''}
+                                </div>
+                            </td>
+                            ${canRegister ? `
+                            <td style="text-align:right">
+                                ${isAdmin || (isCoach && team.institution === tournament.data.auth.coaches[currentUser.email.toLowerCase()]) ? `
+                                    <button class="btn btn-sm btn-secondary" onclick="showRegisterTeamForm(${team.id})">Edit</button>
+                                ` : ''}
+                            </td>
+                            ` : ''}
                         </tr>
-                    `).join('')}
+                        `;
+                    }).join('')}
                 </tbody>
             </table>
         </div>
@@ -1689,15 +1747,42 @@ window.showTeamDetails = function (teamId, previousView = null) {
 
     tabContent.innerHTML = `
         <div class="card">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 2rem;">
                 <div>
-                    <h3>Team Details: ${team.name}</h3>
-                    <div class="text-muted" style="margin-top: 0.5rem;">
-                        <strong>Members:</strong> ${member1Name} & ${member2Name}
-                        ${team.institution ? `<br><strong>Institution:</strong> ${team.institution}` : ''}
-                    </div>
+                    <h3 style="margin:0">Team Details: ${team.name}</h3>
+                    <p class="text-muted" style="margin-top:0.5rem">ID: ${team.id} | ${team.institution || 'No Institution'}</p>
                 </div>
-                <button class="btn btn-secondary" onclick="${backAction}">${backLabel}</button>
+                <button class="btn btn-secondary" onclick="goBack()">${backLabel}</button>
+            </div>
+
+            <div class="stats-grid" style="margin-bottom: 2rem;">
+                <div class="stat-card">
+                    <div class="stat-label">Win/Loss</div>
+                    <div class="stat-value">${team.wins} - ${team.history.length - team.wins}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Score</div>
+                    <div class="stat-value">${team.score.toFixed(1)}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Buchholz</div>
+                    <div class="stat-value">${team.buchholz.toFixed(1)}</div>
+                </div>
+            </div>
+
+            <div style="margin-top: 2rem;">
+                <h4 style="margin-bottom: 1rem;">Members</h4>
+                <div class="members-list" style="display:grid; grid-template-columns: 1fr 1fr; gap:1.5rem">
+                    ${team.members.map((m, idx) => `
+                        <div class="member-profile-card" style="padding: 1.5rem; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; display:flex; flex-direction:column; gap:0.5rem">
+                            <span style="font-weight: 600; font-size: 1.1em">${getMemberName(m)}</span>
+                            ${m.email ? `
+                                <span class="text-muted text-sm">${m.email}</span>
+                                <button class="btn btn-sm btn-secondary" style="margin-top:0.5rem" onclick="showUserProfile('${m.email}', '${getMemberName(m)}', '${team.institution}')">View Participant Profile</button>
+                            ` : '<span class="text-xs text-muted">No email registered</span>'}
+                        </div>
+                    `).join('')}
+                </div>
             </div>
 
             <div class="team-stats-grid">
@@ -2173,57 +2258,61 @@ window.saveParadigm = async function () {
     }
 };
 
-window.showJudgeDetails = async function (judgeId) {
+window.showJudgeDetails = function (judgeId) {
     const judge = tournament.judges.find(j => j.id === judgeId);
     if (!judge) {
         showNotification('Error', 'Judge not found');
         return;
     }
+    showUserProfile(judge.email, judge.name, judge.institution, judgeId);
+};
 
-    activeTab = `judge${judgeId}`;
-    window.location.hash = `judge${judgeId}`;
+window.showUserProfile = async function (email, displayName, institution, judgeId = null) {
+    activeTab = judgeId ? `judge${judgeId}` : `profile_${email}`;
+    window.location.hash = activeTab;
 
-    // Add to navigation history
     if (navigationHistory[navigationHistory.length - 1] !== activeTab) {
         navigationHistory.push(activeTab);
     }
 
-    // Update active state (no specific tab for judge details)
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
-    // Fetch Global Profile if email exists
-    let globalProfile = { paradigm: "", history: [] };
-    if (judge.email) {
-        globalProfile = await tournament.fetchJudgeProfile(judge.email);
+    let globalProfile = { paradigm: "", history: [], aliases: [] };
+    if (email) {
+        globalProfile = await tournament.fetchJudgeProfile(email);
     }
     const globalParadigm = globalProfile.paradigm || "";
-    const globalHistory = globalProfile.history || [];
+    const allHistory = globalProfile.history || [];
+    const aliases = globalProfile.aliases || [];
 
-    // Can edit if current user email matches judge email
-    const canEdit = currentUser && currentUser.email && judge.email &&
-        currentUser.email.toLowerCase() === judge.email.toLowerCase();
+    const judgingHistory = allHistory.filter(h => h.type !== 'participation');
+    const debatingHistory = allHistory.filter(h => h.type === 'participation');
 
-    // Get matches this judge has judged in THIS tournament
-    const judgedMatches = tournament.data.matches.filter(m => m.judge_id === judgeId);
+    const canEdit = currentUser && currentUser.email && email &&
+        currentUser.email.toLowerCase() === email.toLowerCase();
+
+    // Local matches for this tournament if looking at a judge
+    const judgedMatches = judgeId ? tournament.data.matches.filter(m => m.judge_id === judgeId) : [];
 
     tabContent.innerHTML = `
         <div class="card">
             <button class="btn btn-secondary" onclick="goBack()" style="margin-bottom: 1rem;">← Back</button>
             
-            <h3>Judge Details: ${judge.name}</h3>
+            <h3>User Profile: ${displayName}</h3>
+            ${email ? `<p class="text-muted" style="margin-top:-0.5rem">${email}</p>` : ''}
             
             <div class="stats-grid" style="margin-top: 1.5rem; margin-bottom: 2rem;">
                 <div class="stat-card">
                     <div class="stat-label">Institution</div>
-                    <div class="stat-value">${judge.institution}</div>
+                    <div class="stat-value">${institution || 'Unknown'}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Matches Judged (This Tournament)</div>
-                    <div class="stat-value">${judge.matches_judged.length}</div>
+                    <div class="stat-label">Judging Record</div>
+                    <div class="stat-value">${judgingHistory.length} rounds</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Lifetime Record</div>
-                    <div class="stat-value">${globalHistory.length} rounds</div>
+                    <div class="stat-label">Debating Record</div>
+                    <div class="stat-value">${debatingHistory.length} rounds</div>
                 </div>
             </div>
 
@@ -2248,78 +2337,67 @@ window.showJudgeDetails = async function (judgeId) {
                 ` : ''}
             </div>
 
+            ${canEdit ? `
+            <div class="alias-section" style="margin-top: 2rem; padding: 1.5rem; border: 1px dashed #cbd5e1; border-radius: 8px;">
+                <h4>Linked Email Aliases</h4>
+                <p class="text-sm text-muted">Link secondary emails to consolidate your judging and debating history into this primary account.</p>
+                <div style="display:flex; gap:0.5rem; margin-top:1rem;">
+                    <input type="email" id="aliasEmailInput" class="form-control" placeholder="secondary@email.com" style="flex:1">
+                    <button class="btn btn-secondary" onclick="linkSecondaryEmail()">Link Email</button>
+                </div>
+                ${aliases.length > 0 ? `
+                    <ul style="margin-top:1rem; font-size:0.9em;">
+                        ${aliases.map(a => `<li>${a}</li>`).join('')}
+                    </ul>
+                ` : ''}
+            </div>
+            ` : ''}
+
             ${judgedMatches.length > 0 ? `
-                <h4 style="margin-top: 2rem; margin-bottom: 1rem;">Judging History</h4>
+                <h4 style="margin-top: 2rem; margin-bottom: 1rem;">Judging History (This Tournament)</h4>
                 <table class="standings-table">
-                    <thead>
-                        <tr>
-                            <th>Round</th>
-                            <th>Match ID</th>
-                            <th>Aff Team</th>
-                            <th>Neg Team</th>
-                            <th>Decision</th>
-                        </tr>
-                    </thead>
+                    <thead><tr><th>Round</th><th>Match ID</th><th>Aff Team</th><th>Neg Team</th><th>Decision</th></tr></thead>
                     <tbody>
                         ${judgedMatches.map(match => {
-        const affTeam = tournament.teams.find(t => t.id === match.aff_id);
-        const negTeam = tournament.teams.find(t => t.id === match.neg_id);
-        const roundLabel = match.round_num <= tournament.data.config.num_prelim_rounds
-            ? `Round ${match.round_num}`
-            : getElimRoundLabel(match.round_num - tournament.data.config.num_prelim_rounds, tournament.data.config.num_elim_rounds);
-
-        return `
-                                <tr>
-                                    <td>${roundLabel}</td>
-                                    <td>
-                                        <a href="#" onclick="showRound(${match.round_num}, ${match.match_id}); return false;" class="team-link" title="View in Round">
-                                            ${match.match_id}
-                                        </a>
-                                    </td>
-                                    <td>
-                                        <a href="#" onclick="showTeamDetails(${match.aff_id}, 'judge${judgeId}'); return false;" class="team-link">
-                                            ${affTeam ? affTeam.name : 'Unknown'}
-                                        </a>
-                                    </td>
-                                    <td>
-                                        <a href="#" onclick="showTeamDetails(${match.neg_id}, 'judge${judgeId}'); return false;" class="team-link">
-                                            ${negTeam ? negTeam.name : 'Unknown'}
-                                        </a>
-                                    </td>
-                                    <td>${match.result === 'A' ? 'Aff' : match.result === 'N' ? 'Neg' : 'Pending'}</td>
-                                </tr>
-                            `;
-    }).join('')}
+                            const affTeam = tournament.teams.find(t => t.id === match.aff_id);
+                            const negTeam = tournament.teams.find(t => t.id === match.neg_id);
+                            const roundLabel = match.round_num <= tournament.data.config.num_prelim_rounds
+                                ? `Round ${match.round_num}`
+                                : getElimRoundLabel(match.round_num - tournament.data.config.num_prelim_rounds, tournament.data.config.num_elim_rounds);
+                            return `<tr><td>${roundLabel}</td><td>${match.match_id}</td><td>${affTeam ? affTeam.name : 'Unknown'}</td><td>${negTeam ? negTeam.name : 'Unknown'}</td><td>${match.result === 'A' ? 'Aff' : match.result === 'N' ? 'Neg' : 'Pending'}</td></tr>`;
+                        }).join('')}
                     </tbody>
                 </table>
-            ` : `
-                <p class="text-muted" style="text-align:center; padding: 2rem;">
-                    This judge has not been assigned to any matches yet in this tournament.
-                </p>
-            `}
+            ` : ''}
 
-            ${globalHistory.length > 0 ? `
+            ${judgingHistory.length > 0 ? `
                 <h4 style="margin-top: 2rem; margin-bottom: 1rem;">Lifetime Judging Record</h4>
                 <div style="overflow-x: auto;">
                     <table class="standings-table">
-                        <thead>
-                            <tr>
-                                <th>Tournament</th>
-                                <th>Round</th>
-                                <th>Aff Team</th>
-                                <th>Neg Team</th>
-                                <th>Decision</th>
-                                <th>Date</th>
-                            </tr>
-                        </thead>
+                        <thead><tr><th>Tournament</th><th>Round</th><th>Aff Team</th><th>Neg Team</th><th>Decision</th><th>Date</th></tr></thead>
                         <tbody>
-                            ${globalHistory.sort((a, b) => new Date(b.date) - new Date(a.date)).map(record => `
-                                <tr>
+                            ${judgingHistory.sort((a, b) => new Date(b.date) - new Date(a.date)).map(record => `
+                                <tr><td>${record.tournament_name || record.tournament_id}</td><td>${record.round_num}</td><td>${record.aff_name}</td><td>${record.neg_name}</td><td>${record.result === 'A' ? 'Aff' : record.result === 'N' ? 'Neg' : record.result}</td><td>${record.date || 'N/A'}</td></tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            ` : ''}
+
+            ${debatingHistory.length > 0 ? `
+                <h4 style="margin-top: 2rem; margin-bottom: 1rem;">Lifetime Debating Record</h4>
+                <div style="overflow-x: auto;">
+                    <table class="standings-table">
+                        <thead><tr><th>Tournament</th><th>Round</th><th>My Team</th><th>Opponent</th><th>Side</th><th>Result</th><th>Date</th></tr></thead>
+                        <tbody>
+                            ${debatingHistory.sort((a, b) => new Date(b.date) - new Date(a.date)).map(record => `
+                                <tr style="background: ${record.result === 'Win' ? 'rgba(34, 197, 94, 0.05)' : 'rgba(239, 68, 68, 0.05)'}">
                                     <td>${record.tournament_name || record.tournament_id}</td>
                                     <td>${record.round_num}</td>
-                                    <td>${record.aff_name}</td>
-                                    <td>${record.neg_name}</td>
-                                    <td>${record.result === 'A' ? 'Aff' : record.result === 'N' ? 'Neg' : record.result}</td>
+                                    <td>${record.team_name}</td>
+                                    <td>${record.opponent}</td>
+                                    <td>${record.side}</td>
+                                    <td style="font-weight:bold; color: ${record.result === 'Win' ? '#16a34a' : '#dc2626'}">${record.result}</td>
                                     <td>${record.date || 'N/A'}</td>
                                 </tr>
                             `).join('')}
@@ -2329,7 +2407,7 @@ window.showJudgeDetails = async function (judgeId) {
             ` : ''}
         </div>
     `;
-}
+};
 
 
 
@@ -2354,6 +2432,113 @@ window.assignJudge = async function (matchId) {
         showNotification('Success', `Judge "${judge.name}" assigned to Match ${matchId}`);
     } catch (error) {
         showNotification('Error', error.message);
+    }
+};
+window.linkSecondaryEmail = async function () {
+    const input = document.getElementById('aliasEmailInput');
+    const email = input.value.trim();
+    if (!email) return;
+
+    showLoading(`Linking ${email}...`);
+    try {
+        const response = await fetch(`${tournament.backendUrl}/api/user/link_email`, {
+            method: 'POST',
+            headers: tournament.getAuthHeaders(),
+            body: JSON.stringify({ secondary_email: email })
+        });
+
+        if (response.ok) {
+            showNotification('Success', `Successfully linked ${email}!`);
+            // Refresh profile view
+            const data = await response.json();
+            const prof = data.profile;
+            showUserProfile(currentUser.email, currentUser.name, null); 
+        } else {
+            const err = await response.json();
+            showNotification('Error', err.error || 'Failed to link email');
+        }
+    } catch (e) {
+        showNotification('Error', 'Network error linking email');
+    } finally {
+        hideLoading();
+    }
+};
+
+// Team Modal Logic
+window.showRegisterTeamForm = function (teamId = null) {
+    const role = getUserRole();
+    if (role !== 'admin' && role !== 'coach') return;
+
+    teamModalForm.reset();
+    teamIdInput.value = teamId !== null ? teamId : '';
+    teamModalTitle.textContent = teamId !== null ? 'Edit Team' : 'Register New Team';
+
+    if (role === 'coach') {
+        const coachInst = tournament.data.auth.coaches[currentUser.email.toLowerCase()];
+        teamInstitutionInput.value = coachInst;
+        teamInstitutionInput.readOnly = true;
+        teamInstitutionInput.style.backgroundColor = '#f3f4f6';
+    } else {
+        teamInstitutionInput.readOnly = false;
+        teamInstitutionInput.style.backgroundColor = '';
+    }
+
+    if (teamId !== null) {
+        const team = tournament.teams.find(t => t.id === teamId);
+        if (team) {
+            teamNameInput.value = team.name;
+            teamInstitutionInput.value = team.institution;
+            if (team.members[0]) {
+                member1NameInput.value = typeof team.members[0] === 'string' ? team.members[0] : team.members[0].name;
+                member1EmailInput.value = team.members[0].email || '';
+            }
+            if (team.members[1]) {
+                member2NameInput.value = typeof team.members[1] === 'string' ? team.members[1] : team.members[1].name;
+                member2EmailInput.value = team.members[1].email || '';
+            }
+        }
+    }
+
+    teamModal.classList.remove('hidden');
+};
+
+closeTeamModalBtn.onclick = () => teamModal.classList.add('hidden');
+
+teamModalForm.onsubmit = async (e) => {
+    e.preventDefault();
+    const teamId = teamIdInput.value ? parseInt(teamIdInput.value) : null;
+    
+    const teamData = {
+        id: teamId,
+        name: teamNameInput.value.trim(),
+        institution: teamInstitutionInput.value.trim(),
+        members: [
+            { name: member1NameInput.value.trim(), email: member1EmailInput.value.trim().toLowerCase() },
+            { name: member2NameInput.value.trim(), email: member2EmailInput.value.trim().toLowerCase() }
+        ]
+    };
+
+    showLoading('Saving team...');
+    try {
+        const response = await fetch(`${tournament.backendUrl}/api/t/${tournament.tournamentId}/register_team`, {
+            method: 'POST',
+            headers: tournament.getAuthHeaders(),
+            body: JSON.stringify(teamData)
+        });
+
+        if (response.ok) {
+            teamModal.classList.add('hidden');
+            showNotification('Success', 'Team registered successfully!');
+            await tournament.loadFromStorage();
+            initUI();
+        } else {
+            const err = await response.json();
+            showNotification('Error', err.error || 'Failed to register team');
+        }
+    } catch (error) {
+        showNotification('Error', 'Network error registering team');
+    } finally {
+        hideLoading();
     }
 };
 

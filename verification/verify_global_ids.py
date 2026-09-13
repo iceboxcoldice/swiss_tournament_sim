@@ -46,8 +46,8 @@ try:
     m1 = matches[0]
     m2 = matches[1]
     with open("r1_results.txt", "w") as f:
-        f.write(f"1 {m1['match_id']} {m1['aff_id']} {m1['neg_id']} A\n")
-        f.write(f"1 {m2['match_id']} {m2['aff_id']} {m2['neg_id']} N\n")
+        f.write(f"1 {m1['match_id']} {m1['aff_id']} {m1['neg_id']} A 0\n")
+        f.write(f"1 {m2['match_id']} {m2['aff_id']} {m2['neg_id']} N 0\n")
     subprocess.run(["python3", "tournament_manager.py", "report", "1", "--file", "r1_results.txt"], check=True)
     
     print("\n--- Pair R2 ---")

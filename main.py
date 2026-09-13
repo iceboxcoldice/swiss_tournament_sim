@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+from datetime import datetime
 from dataclasses import asdict
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
@@ -99,9 +100,59 @@ def save_tournament_to_gcs(data, tournament_id=DEFAULT_TOURNAMENT_ID):
         logger.error(f"Error saving {tournament_id}: {e}")
         return False
 
+def get_aliases_path():
+    if BUCKET_NAME:
+        return "profiles/aliases.json"
+    else:
+        p_dir = os.path.join(LOCAL_STORAGE_DIR, 'profiles')
+        if not os.path.exists(p_dir):
+            os.makedirs(p_dir)
+        return os.path.join(p_dir, "aliases.json")
+
+def load_aliases():
+    try:
+        path = get_aliases_path()
+        if BUCKET_NAME:
+            client = get_storage_client()
+            bucket = client.bucket(BUCKET_NAME)
+            blob = bucket.blob(path)
+            if blob.exists():
+                return json.loads(blob.download_as_text())
+        else:
+            if os.path.exists(path):
+                with open(path, 'r') as f:
+                    return json.load(f)
+    except Exception as e:
+        logger.error(f"Error loading aliases: {e}")
+    return {}
+
+def save_aliases(aliases_dict):
+    try:
+        path = get_aliases_path()
+        data_str = json.dumps(aliases_dict, indent=2)
+        if BUCKET_NAME:
+            client = get_storage_client()
+            bucket = client.bucket(BUCKET_NAME)
+            blob = bucket.blob(path)
+            blob.upload_from_string(data_str, content_type='application/json')
+        else:
+            with open(path, 'w') as f:
+                f.write(data_str)
+        return True
+    except Exception as e:
+        logger.error(f"Error saving aliases: {e}")
+        return False
+
+def resolve_email(email):
+    """Resolve secondary email to primary email using aliases.json if it exists."""
+    email = email.lower().strip()
+    aliases = load_aliases()
+    return aliases.get(email, email)
+
 def get_profile_path(email):
     """Get storage path for a user's profile."""
-    safe_email = email.lower().replace('@', '_at_').replace('.', '_')
+    resolved_email = resolve_email(email)
+    safe_email = resolved_email.replace('@', '_at_').replace('.', '_')
     if BUCKET_NAME:
         return f"profiles/{safe_email}.json"
     else:
@@ -260,6 +311,11 @@ def require_auth(allowed_roles=None):
                         
                 if 'judge' in allowed_roles and not has_role:
                     if user_email in judge_emails:
+                        has_role = True
+                
+                if 'coach' in allowed_roles and not has_role:
+                    coach_mapping = auth_data.get('coaches', {})
+                    if user_email in coach_mapping:
                         has_role = True
 
                 if not has_role:
@@ -733,6 +789,45 @@ def update_judge_profile_endpoint():
         return jsonify({"message": "Profile updated successfuly"}), 200
     else:
         return jsonify({"error": "Failed to save profile"}), 500
+@app.route('/api/user/link_email', methods=['POST'])
+@require_auth()
+def link_email_endpoint():
+    """Link a secondary email to the authenticated user's primary profile."""
+    if not request.user_info:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    primary_email = request.user_info.get('email').lower().strip()
+    data = request.json
+    secondary_email = data.get('secondary_email', '').lower().strip()
+    
+    if not secondary_email or secondary_email == primary_email:
+        return jsonify({"error": "Invalid secondary email"}), 400
+        
+    # 1. Update Global Aliases
+    aliases = load_aliases()
+    if secondary_email in aliases and aliases[secondary_email] != primary_email:
+        return jsonify({"error": f"Email {secondary_email} is already linked to another account"}), 400
+    
+    aliases[secondary_email] = primary_email
+    if not save_aliases(aliases):
+        return jsonify({"error": "Failed to save alias mapping"}), 500
+        
+    # 2. Update Primary Profile
+    profile = load_judge_profile(primary_email)
+    if 'aliases' not in profile:
+        profile['aliases'] = []
+    if secondary_email not in profile['aliases']:
+        profile['aliases'].append(secondary_email)
+        
+    # 3. Optional: Merge existing history from secondary if it exists
+    # If there's already a profile for the secondary email that isn't just an alias, merge it.
+    secondary_path = get_profile_path(secondary_email) # Note: get_profile_path now resolves, so this is tricky.
+    # We need a way to check if a file specifically for secondary_email exists BEFORE resolving.
+    
+    if save_judge_profile(primary_email, profile):
+        return jsonify({"message": f"Successfully linked {secondary_email} to {primary_email}", "profile": profile}), 200
+    else:
+        return jsonify({"error": "Failed to update profile"}), 500
 
 @app.route('/api/t/<tournament_id>/close', methods=['POST'])
 @require_auth(allowed_roles=['admin'])
@@ -746,56 +841,118 @@ def close_tournament_endpoint(tournament_id):
         if data.get('is_closed'):
             return jsonify({"error": "Tournament is already closed"}), 400
 
-        # Aggregate history for all judges
+        # 1. Aggregate history for all judges
         judges_data = data.get('judges', [])
         matches = data.get('matches', [])
-        
         updated_count = 0
-        for judge in judges_data:
-            email = judge.get('email')
-            if not email:
+        
+        # Build dictionary for quick judge lookup
+        judges_dict = {j.get('id'): j for j in judges_data}
+        
+        # Track history records per judge
+        judge_history_commits = {} # email -> list of records
+        
+        for m in matches:
+            judge_id = m.get('judge_id')
+            if not judge_id or not m.get('result'):
                 continue
                 
-            judge_id = judge.get('id')
-            # Find all matches judged by this judge in this tournament
-            judged_matches = [m for m in matches if m.get('judge_id') == judge_id and m.get('result')]
-            
-            if not judged_matches:
+            judge = judges_dict.get(judge_id)
+            if not judge or not judge.get('email'):
                 continue
                 
-            # Prepare records
-            records = []
-            for m in judged_matches:
-                records.append({
-                    "tournament_id": tournament_id,
-                    "tournament_name": data.get('tournamentId', tournament_id),
-                    "match_id": m.get('match_id'),
-                    "round_num": m.get('round_num'),
-                    "aff_name": m.get('aff_name'),
-                    "neg_name": m.get('neg_name'),
-                    "result": m.get('result'),
-                    "date": tm.datetime.now().strftime("%Y-%m-%d %H:%M") if hasattr(tm, 'datetime') else ""
-                })
+            email = judge.get('email').lower()
+            if email not in judge_history_commits:
+                judge_history_commits[email] = []
+                
+            judge_history_commits[email].append({
+                "tournament_id": tournament_id,
+                "tournament_name": data.get('tournamentId', tournament_id),
+                "match_id": m.get('match_id'),
+                "round_num": m.get('round_num'),
+                "aff_team": m.get('aff_name'),
+                "neg_team": m.get('neg_name'),
+                "result": m.get('result'),
+                "date": datetime.now().strftime("%Y-%m-%d %H:%M")
+            })
+
+        for email, records in judge_history_commits.items():
+            success = False
+            for record in records:
+                if append_to_judge_history(email, record):
+                    success = True
+            if success:
+                updated_count += 1
+
+        # 2. Aggregate history for all participants (debaters)
+        participant_updated_count = 0
+        teams_data = data.get('teams', [])
+        
+        for team in teams_data:
+            institution = team.get('institution', 'Unknown')
+            team_name = team.get('name', 'Unknown')
+            team_id = team.get('id')
+            members = team.get('members', [])
             
-            # Commit to global profile
-            if records:
-                profile = load_judge_profile(email)
-                if 'history' not in profile:
-                    profile['history'] = []
+            # Find matches for this team
+            team_matches = [m for m in matches if (m.get('aff_id') == team_id or m.get('neg_id') == team_id) and m.get('result')]
+            
+            if not team_matches:
+                continue
                 
-                # Filter out existing records for this tournament to avoid duplicates on re-close
-                profile['history'] = [r for r in profile['history'] if r.get('tournament_id') != tournament_id]
-                profile['history'].extend(records)
+            for member in members:
+                member_email = member.get('email')
+                if not member_email:
+                    continue
+                    
+                member_records = []
+                for m in team_matches:
+                    is_aff = m.get('aff_id') == team_id
+                    side = "Aff" if is_aff else "Neg"
+                    opponent_name = m.get('neg_name') if is_aff else m.get('aff_name')
+                    
+                    # Result from perspective of this team
+                    raw_result = m.get('result')
+                    if raw_result == 'A':
+                        result = "Win" if is_aff else "Loss"
+                    elif raw_result == 'N':
+                        result = "Win" if not is_aff else "Loss"
+                    else:
+                        result = "Pending"
+                        
+                    member_records.append({
+                        "type": "participation",
+                        "tournament_id": tournament_id,
+                        "tournament_name": data.get('tournamentId', tournament_id),
+                        "match_id": m.get('match_id'),
+                        "round_num": m.get('round_num'),
+                        "side": side,
+                        "opponent": opponent_name,
+                        "team_name": team_name,
+                        "institution": institution,
+                        "result": result,
+                        "date": datetime.now().strftime("%Y-%m-%d %H:%M")
+                    })
                 
-                if save_judge_profile(email, profile):
-                    updated_count += 1
+                if member_records:
+                    profile = load_judge_profile(member_email)
+                    if 'history' not in profile:
+                        profile['history'] = []
+                    
+                    # Filter existing participation records for this tournament
+                    profile['history'] = [r for r in profile['history'] if not (r.get('tournament_id') == tournament_id and r.get('type') == 'participation')]
+                    profile['history'].extend(member_records)
+                    
+                    if save_judge_profile(member_email, profile):
+                        participant_updated_count += 1
 
         # Mark tournament as closed
         data['is_closed'] = True
         if patched_save_tournament_with_id(data, teams, tournament_id):
             return jsonify({
-                "message": f"Tournament closed. {updated_count} judge profiles updated.",
-                "updated_judges": updated_count
+                "message": f"Tournament closed. {updated_count} judge and {participant_updated_count} participant profiles updated.",
+                "updated_judges": updated_count,
+                "updated_participants": participant_updated_count
             }), 200
         else:
             return jsonify({"error": "Failed to save tournament closure"}), 500
@@ -803,6 +960,71 @@ def close_tournament_endpoint(tournament_id):
     except Exception as e:
         logger.error(f"Error closing tournament {tournament_id}: {e}")
         return jsonify({"error": str(e)}), 500
+@app.route('/api/t/<tournament_id>/register_team', methods=['POST'])
+@require_auth(allowed_roles=['admin', 'coach'])
+def register_team_endpoint(tournament_id):
+    """Allow coaches or admins to register a team."""
+    try:
+        user_info = getattr(request, 'user_info', None)
+        user_email = user_info.get('email', '').lower() if user_info else ""
+        
+        data, teams_objs = patched_load_tournament_with_id(tournament_id)
+        if not data:
+            return jsonify({"error": "Tournament not found"}), 404
+            
+        if data.get('is_closed'):
+            return jsonify({"error": "Tournament is closed"}), 403
+
+        auth_data = data.get('auth', {})
+        admin_emails = [e.lower() for e in auth_data.get('admins', [])]
+        coach_mapping = auth_data.get('coaches', {})
+        
+        is_admin = user_email in admin_emails
+        coach_institution = coach_mapping.get(user_email)
+
+        # Parse team from request
+        req_data = request.json
+        team_id = req_data.get('id')
+        team_name = req_data.get('name')
+        institution = req_data.get('institution')
+        members = req_data.get('members', [])
+
+        if not team_name or not institution:
+            return jsonify({"error": "Team name and institution are required"}), 400
+
+        # Security Check: Coaches can only add for their institution
+        if not is_admin:
+            if not coach_institution or institution != coach_institution:
+                return jsonify({"error": f"Unauthorized: You can only register teams for {coach_institution}"}), 403
+
+        # Add or update team
+        if team_id is not None:
+            # Update existing
+            existing_team = next((t for t in teams_objs if t.id == team_id), None)
+            if existing_team:
+                if not is_admin and existing_team.institution != coach_institution:
+                     return jsonify({"error": "Unauthorized: Cannot edit team from another institution"}), 403
+                existing_team.name = team_name
+                existing_team.institution = institution
+                # Update members (handle emails)
+                existing_team.members = members
+            else:
+                return jsonify({"error": "Team ID not found"}), 404
+        else:
+            # New team
+            max_id = max([t.id for t in teams_objs] + [-1])
+            new_team = tm.Team(id=max_id + 1, name=team_name, institution=institution, members=members)
+            teams_objs.append(new_team)
+
+        if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+            return jsonify({"message": "Team registered successfully", "team_id": team_id if team_id is not None else (new_team.id if 'new_team' in locals() else 0)}), 200
+        else:
+            return jsonify({"error": "Failed to save tournament data"}), 500
+
+    except Exception as e:
+        logger.error(f"Error registering team: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8081))

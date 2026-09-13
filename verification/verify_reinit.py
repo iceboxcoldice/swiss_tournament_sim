@@ -68,8 +68,8 @@ try:
     # Create results file
     with open("test_results.txt", "w") as f:
         f.write("# Test results\n")
-        f.write("1 1 0 1 A\n")
-        f.write("1 2 2 3 N\n")
+        f.write("1 1 0 1 A 0\n")
+        f.write("1 2 2 3 N 0\n")
     
     # Reinit with results
     result = subprocess.run(
@@ -128,7 +128,7 @@ try:
     print("\n=== Test 4: Error - Team ID mismatch ===")
     
     with open("mismatch_results.txt", "w") as f:
-        f.write("1 1 0 2 A\n")  # Wrong team IDs
+        f.write("1 1 0 2 A 0\n")  # Wrong team IDs
     
     result = subprocess.run(
         ["python3", "tournament_manager.py", "reinit",
@@ -151,7 +151,7 @@ try:
     print("\n=== Test 5: Error - Match ID not in pairings ===")
     
     with open("missing_match_results.txt", "w") as f:
-        f.write("1 99 0 1 A\n")  # Match ID 99 doesn't exist
+        f.write("1 99 0 1 A 0\n")  # Match ID 99 doesn't exist
     
     result = subprocess.run(
         ["python3", "tournament_manager.py", "reinit",

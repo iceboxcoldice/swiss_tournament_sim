@@ -9,5 +9,6 @@ services:
       - ./local_storage:/app/local_storage
     environment:
       - PORT=8081
-      - GOOGLE_OAUTH_CLIENT_ID=1040110950776-lp97tkf0bhc36c8s3v405c46hhf0m53m.apps.googleusercontent.com
+      # Uncomment the line below to enable Google OAuth (requires real sign-in):
+      # - GOOGLE_OAUTH_CLIENT_ID=1040110950776-lp97tkf0bhc36c8s3v405c46hhf0m53m.apps.googleusercontent.com
     restart: always

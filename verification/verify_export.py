@@ -25,7 +25,7 @@ try:
     print("\n--- Report R1 ---")
     with open("r1_results.txt", "w") as f:
         for m in r1_matches:
-            f.write(f"1 {m['match_id']} {m['aff_id']} {m['neg_id']} A\n")
+            f.write(f"1 {m['match_id']} {m['aff_id']} {m['neg_id']} A 0\n")
     subprocess.run(["python3", "tournament_manager.py", "report", "1", "--file", "r1_results.txt"], check=True)
     
     print("\n--- Pair R2 ---")
@@ -42,7 +42,7 @@ try:
     print("\n--- Report R2 ---")
     with open("r2_results.txt", "w") as f:
         for m in r2_matches:
-            f.write(f"2 {m['match_id']} {m['aff_id']} {m['neg_id']} N\n")
+            f.write(f"2 {m['match_id']} {m['aff_id']} {m['neg_id']} N 0\n")
     subprocess.run(["python3", "tournament_manager.py", "report", "2", "--file", "r2_results.txt"], check=True)
     
     # Export results

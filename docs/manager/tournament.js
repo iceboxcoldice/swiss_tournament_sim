@@ -6,10 +6,10 @@ class Team {
         this.id = id;
         this.name = name;
         this.institution = institution || 'Unknown';
-        // Each member has {name: string, id: number}
+        // Each member has {name: string, id: number, email: string}
         this.members = members.length === 2 ? members : [
-            { name: `Member 1`, id: 1 },
-            { name: `Member 2`, id: 2 }
+            { name: `Member 1`, id: 1, email: '' },
+            { name: `Member 2`, id: 2, email: '' }
         ];
         this.wins = 0;
         this.score = 0;
@@ -96,6 +96,15 @@ class TournamentManager {
             // Dispatch event for app.js to refresh if needed
             window.dispatchEvent(new CustomEvent('tournamentSyncComplete'));
         }
+    }
+
+    /**
+     * Returns the effective backend URL.
+     * Falls back to window.location.origin when served from a backend (e.g. Docker)
+     * but no explicit backendUrl was configured via the Cloud modal.
+     */
+    getEffectiveBackendUrl() {
+        return this.backendUrl || (typeof window !== 'undefined' ? window.location.origin : null);
     }
 
     setBackendUrl(url) {
@@ -205,6 +214,14 @@ class TournamentManager {
         this.teams = this.data.teams.map(t => {
             const team = new Team(t.id, t.name, t.institution, t.members);
             Object.assign(team, t);
+            // Ensure members are properly assigned if t.members exists
+            if (t.members) {
+                team.members = t.members.map((m, idx) => ({
+                    name: m.name || `Member ${idx + 1}`,
+                    id: m.id || idx + 1,
+                    email: m.email || ''
+                }));
+            }
             return team;
         });
 
@@ -289,8 +306,15 @@ class TournamentManager {
             const name = detail.name || `Team ${i + 1}`;
             const institution = detail.institution || 'Unknown';
             const members = detail.members && detail.members.length === 2
-                ? detail.members.map((m, idx) => ({ name: m.name || `Member ${idx + 1}`, id: idx + 1 }))
-                : [{ name: `Member 1`, id: 1 }, { name: `Member 2`, id: 2 }];
+                ? detail.members.map((m, idx) => ({
+                    name: m.name || `Member ${idx + 1}`,
+                    id: idx + 1,
+                    email: m.email || ''
+                }))
+                : [
+                    { name: `Member 1`, id: 1, email: '' },
+                    { name: `Member 2`, id: 2, email: '' }
+                ];
 
             this.teams.push(new Team(i, name, institution, members));
         }
@@ -523,9 +547,10 @@ class TournamentManager {
 
     // Global Profile Helpers (Paradigm + History)
     async fetchJudgeProfile(email) {
-        if (!this.backendUrl || !email) return { paradigm: "", history: [] };
+        const effectiveUrl = this.getEffectiveBackendUrl();
+        if (!effectiveUrl || !email) return { paradigm: "", history: [] };
         try {
-            const response = await fetch(`${this.backendUrl}/api/judge_profile/${encodeURIComponent(email)}`);
+            const response = await fetch(`${effectiveUrl}/api/judge_profile/${encodeURIComponent(email)}`);
             if (response.ok) {
                 return await response.json();
             }
@@ -536,9 +561,10 @@ class TournamentManager {
     }
 
     async updateJudgeParadigm(paradigm) {
-        if (!this.backendUrl) throw new Error("Backend not connected");
+        const effectiveUrl = this.getEffectiveBackendUrl();
+        if (!effectiveUrl) throw new Error("Backend not connected");
 
-        const response = await fetch(`${this.backendUrl}/api/judge_profile`, {
+        const response = await fetch(`${effectiveUrl}/api/judge_profile`, {
             method: 'POST',
             headers: this.getAuthHeaders(),
             body: JSON.stringify({ paradigm })
@@ -552,9 +578,10 @@ class TournamentManager {
     }
 
     async closeTournament() {
-        if (!this.backendUrl) throw new Error("Backend not connected");
+        const effectiveUrl = this.getEffectiveBackendUrl();
+        if (!effectiveUrl) throw new Error("Backend not connected");
 
-        const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/close`, {
+        const response = await fetch(`${effectiveUrl}/api/t/${this.tournamentId}/close`, {
             method: 'POST',
             headers: this.getAuthHeaders()
         });

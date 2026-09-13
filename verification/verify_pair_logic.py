@@ -46,7 +46,7 @@ def main():
     
     with open("r2_results.txt", "w") as f:
         for m in r2_matches:
-            f.write(f"2 {m['match_id']} {m['aff_id']} {m['neg_id']} A\n")
+            f.write(f"2 {m['match_id']} {m['aff_id']} {m['neg_id']} A 0\n")
             
     # Report R2. Note: R1 is still unreported.
     # Does reporting R2 require R1 results?
@@ -69,7 +69,7 @@ def main():
     r1_matches = [m for m in matches if m['round_num'] == 1]
     with open("r1_results.txt", "w") as f:
         for m in r1_matches:
-            f.write(f"1 {m['match_id']} {m['aff_id']} {m['neg_id']} A\n")
+            f.write(f"1 {m['match_id']} {m['aff_id']} {m['neg_id']} A 0\n")
     run_cmd(["python3", "tournament_manager.py", "report", "1", "--file", "r1_results.txt"])
     
     print("Reporting R2...")
