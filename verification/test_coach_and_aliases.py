@@ -413,5 +413,93 @@ class TestCoachAndAliases(unittest.TestCase):
             self.assertNotIn('bad_applicant@spam.com', t_data['auth'].get('coaches', {}))
             self.assertNotIn('bad_applicant@spam.com', t_data['auth'].get('coach_requests', {}))
 
+    def test_student_team_self_registration_under_approved_coach(self):
+        with patch('main.GOOGLE_OAUTH_CLIENT_ID', 'test-client-id'), \
+             patch('main.verify_google_token') as mock_verify:
+            
+            # 1. Setup approved coach for Harvard
+            mock_verify.return_value = {'email': 'admin@example.com'}
+            self.app.post(
+                f'/api/t/{self.tournament_id}/coaches',
+                headers={'Authorization': 'Bearer admin-token'},
+                json={'email': 'coach_harvard@harvard.edu', 'institution': 'Harvard'}
+            )
+
+            # 2. Student attempts to register team for Yale (which has no approved coach) -> 400 Bad Request
+            mock_verify.return_value = {'email': 'student_yale@yale.edu'}
+            res = self.app.post(
+                f'/api/t/{self.tournament_id}/team_requests',
+                headers={'Authorization': 'Bearer student-token'},
+                json={
+                    'name': 'Yale X',
+                    'institution': 'Yale',
+                    'members': [{'name': 'Y1', 'email': 'y1@yale.edu'}, {'name': 'Y2', 'email': 'y2@yale.edu'}]
+                }
+            )
+            self.assertEqual(res.status_code, 400)
+            self.assertIn('does not have an approved coach', res.get_json()['error'])
+
+            # 3. Student registers team under Harvard (which HAS an approved coach) -> 200 Success
+            mock_verify.return_value = {'email': 'student_harvard@harvard.edu'}
+            res = self.app.post(
+                f'/api/t/{self.tournament_id}/team_requests',
+                headers={'Authorization': 'Bearer student-token'},
+                json={
+                    'name': 'Harvard Novice 1',
+                    'institution': 'Harvard',
+                    'members': [
+                        {'name': 'Alice Smith', 'email': 'alice@harvard.edu'},
+                        {'name': 'Bob Jones', 'email': 'bob@harvard.edu'}
+                    ]
+                }
+            )
+            self.assertEqual(res.status_code, 200)
+            req_data = res.get_json()
+            req_id = req_data['request_id']
+            self.assertIn('submitted to your Harvard coach', req_data['message'])
+
+            # 4. Harvard coach views pending team requests -> sees Harvard Novice 1
+            mock_verify.return_value = {'email': 'coach_harvard@harvard.edu'}
+            res = self.app.get(
+                f'/api/t/{self.tournament_id}/team_requests',
+                headers={'Authorization': 'Bearer coach-token'}
+            )
+            self.assertEqual(res.status_code, 200)
+            team_reqs = res.get_json()['team_requests']
+            self.assertIn(req_id, team_reqs)
+            self.assertEqual(team_reqs[req_id]['name'], 'Harvard Novice 1')
+
+            # 5. Another coach from a different school tries to approve Harvard team -> 403 Forbidden
+            mock_verify.return_value = {'email': 'admin@example.com'}
+            self.app.post(
+                f'/api/t/{self.tournament_id}/coaches',
+                headers={'Authorization': 'Bearer admin-token'},
+                json={'email': 'coach_princeton@princeton.edu', 'institution': 'Princeton'}
+            )
+            mock_verify.return_value = {'email': 'coach_princeton@princeton.edu'}
+            res = self.app.post(
+                f'/api/t/{self.tournament_id}/team_requests/{req_id}/approve',
+                headers={'Authorization': 'Bearer princeton-token'}
+            )
+            self.assertEqual(res.status_code, 403)
+
+            # 6. Harvard coach approves team -> 200 Success
+            mock_verify.return_value = {'email': 'coach_harvard@harvard.edu'}
+            res = self.app.post(
+                f'/api/t/{self.tournament_id}/team_requests/{req_id}/approve',
+                headers={'Authorization': 'Bearer coach-token'}
+            )
+            self.assertEqual(res.status_code, 200)
+            self.assertIn('approved and registered successfully', res.get_json()['message'])
+
+            # Verify team is officially registered in tournament roster
+            t_data, teams_objs = main.patched_load_tournament_with_id(self.tournament_id)
+            registered_team = next((t for t in teams_objs if t.name == 'Harvard Novice 1'), None)
+            self.assertIsNotNone(registered_team)
+            self.assertEqual(registered_team.institution, 'Harvard')
+            self.assertEqual(len(registered_team.members), 2)
+            self.assertEqual(t_data['config']['num_teams'], 3) # started with 2, now 3
+            self.assertNotIn(req_id, t_data.get('team_requests', {}))
+
 if __name__ == '__main__':
     unittest.main()

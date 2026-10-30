@@ -167,6 +167,7 @@
     <div id="teamModal" class="modal hidden">
         <div class="modal-content" style="max-width: 600px;">
             <h3 id="teamModalTitle">Register Team</h3>
+            <p id="teamModalSubtitle" class="text-muted" style="margin-top:-0.5rem; margin-bottom:1rem; font-size:0.85rem; display:none;"></p>
             <form id="teamModalForm">
                 <input type="hidden" id="teamIdInput">
                 <div class="form-group">
@@ -175,7 +176,9 @@
                 </div>
                 <div class="form-group">
                     <label for="teamInstitutionInput">Institution:</label>
-                    <input type="text" id="teamInstitutionInput" required placeholder="e.g. Yale University">
+                    <input type="text" id="teamInstitutionInput" list="approvedInstitutionsList" required placeholder="e.g. Yale University">
+                    <datalist id="approvedInstitutionsList"></datalist>
+                    <small id="teamInstitutionHint" class="text-muted" style="display:none; margin-top:0.25rem; font-size:0.8rem;"></small>
                 </div>
                 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;">

@@ -1166,7 +1166,7 @@ function generateBracketHTML() {
 }
 
 // Show Entries (Team List)
-function showEntries() {
+async function showEntries() {
     activeTab = 'entries';
     window.location.hash = 'entries';
 
@@ -1244,12 +1244,70 @@ function showEntries() {
     const isCoach = role === 'coach';
     const isAdmin = role === 'admin';
     const canRegister = (isAdmin || isCoach) && !tournament.data.is_closed;
+    const canSelfRegister = currentUser && role === 'participant' && !tournament.data.is_closed && (!tournament.data.matches || tournament.data.matches.length === 0);
+
+    let teamRequests = {};
+    if (isAdmin || isCoach) {
+        try {
+            teamRequests = await tournament.fetchTeamRequests();
+        } catch (e) {
+            teamRequests = (tournament.data && tournament.data.team_requests) || {};
+        }
+    }
+    const teamRequestKeys = Object.keys(teamRequests || {});
 
     tabContent.innerHTML = `
+        ${teamRequestKeys.length > 0 ? `
+        <div class="card" style="border: 1px solid #f59e0b; background: #fffdf5; margin-bottom: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h3 style="color: #b45309; margin: 0;">⏳ Pending Student Team Registrations</h3>
+                <span style="background: #fef3c7; color: #b45309; padding: 0.2rem 0.6rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem;">${teamRequestKeys.length} Pending Approval</span>
+            </div>
+            <p class="text-muted" style="margin-top: 0;">The following student teams have self-registered and require coach/admin verification before being entered into tournament pairings:</p>
+            <table class="standings-table">
+                <thead>
+                    <tr>
+                        <th>Team Name</th>
+                        <th>Institution</th>
+                        <th>Debater 1</th>
+                        <th>Debater 2</th>
+                        <th>Submitted By</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${teamRequestKeys.map(k => {
+                        const req = teamRequests[k];
+                        const m1 = req.members && req.members[0] ? `${req.members[0].name} (${req.members[0].email})` : '—';
+                        const m2 = req.members && req.members[1] ? `${req.members[1].name} (${req.members[1].email})` : '—';
+                        return `
+                            <tr>
+                                <td><strong>${req.name}</strong></td>
+                                <td><span style="font-weight: 600; color: var(--primary);">${req.institution}</span></td>
+                                <td>${m1}</td>
+                                <td>${m2}</td>
+                                <td class="text-muted" style="font-size: 0.85em;">${req.submitted_by || '—'}</td>
+                                <td>
+                                    <div style="display: flex; gap: 0.5rem;">
+                                        <button class="btn btn-sm btn-primary" onclick="handleApproveTeamRequest('${k}')">Approve Team</button>
+                                        <button class="btn btn-sm btn-danger" onclick="handleRejectTeamRequest('${k}')">Reject</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+        ` : ''}
+
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                 <h3>Team Entries List</h3>
-                ${canRegister ? `<button class="btn btn-primary" onclick="showRegisterTeamForm()">+ Register Team</button>` : ''}
+                <div style="display: flex; gap: 0.5rem;">
+                    ${canRegister ? `<button class="btn btn-primary" onclick="showRegisterTeamForm()">+ Register Team</button>` : ''}
+                    ${canSelfRegister ? `<button class="btn btn-primary" onclick="showRegisterTeamForm()">+ Self-Register Team</button>` : ''}
+                </div>
             </div>
             <p class="text-muted">Total Teams: ${teams.length}</p>
             <table class="standings-table">
@@ -2879,18 +2937,66 @@ window.linkSecondaryEmail = async function () {
 // Team Modal Logic
 window.showRegisterTeamForm = function (teamId = null) {
     const role = getUserRole();
-    if (role !== 'admin' && role !== 'coach') return;
+    if (!currentUser && role !== 'admin') {
+        showNotification('Login Required', 'Please sign in with Google to register a team.');
+        return;
+    }
 
     teamModalForm.reset();
     teamIdInput.value = teamId !== null ? teamId : '';
-    teamModalTitle.textContent = teamId !== null ? 'Edit Team' : 'Register New Team';
 
-    if (role === 'coach') {
+    const subtitleEl = document.getElementById('teamModalSubtitle');
+    const hintEl = document.getElementById('teamInstitutionHint');
+    const datalist = document.getElementById('approvedInstitutionsList');
+    const submitBtn = teamModalForm.querySelector('button[type="submit"]');
+
+    // Populate approved institutions datalist
+    const approvedCoaches = (tournament.data && tournament.data.auth && tournament.data.auth.coaches) || {};
+    const approvedInstitutions = Array.from(new Set(Object.values(approvedCoaches))).sort();
+    if (datalist) {
+        datalist.innerHTML = approvedInstitutions.map(inst => `<option value="${inst}">`).join('');
+    }
+
+    if (role === 'participant') {
+        // Student self-registration under an approved coach
+        teamModalTitle.textContent = 'Register Team (Requires Coach Approval)';
+        if (subtitleEl) {
+            subtitleEl.textContent = 'Select an institution with an approved coach. Your coach will review and approve your entry.';
+            subtitleEl.style.display = 'block';
+        }
+        if (hintEl) {
+            hintEl.textContent = approvedInstitutions.length > 0 
+                ? `Approved coaches available for: ${approvedInstitutions.join(', ')}` 
+                : 'No approved school coaches yet. An institutional coach must be registered before student teams can self-register.';
+            hintEl.style.display = 'block';
+        }
+        if (submitBtn) submitBtn.textContent = 'Submit for Coach Approval';
+
+        teamInstitutionInput.readOnly = false;
+        teamInstitutionInput.style.backgroundColor = '';
+
+        // Pre-fill Member 1 with logged in student info
+        if (currentUser) {
+            member1NameInput.value = currentUser.name || '';
+            member1EmailInput.value = currentUser.email || '';
+        }
+    } else if (role === 'coach') {
+        teamModalTitle.textContent = teamId !== null ? 'Edit Team' : 'Register New Team';
+        if (subtitleEl) subtitleEl.style.display = 'none';
+        if (hintEl) hintEl.style.display = 'none';
+        if (submitBtn) submitBtn.textContent = teamId !== null ? 'Update Team' : 'Save Team';
+
         const coachInst = tournament.data.auth.coaches[currentUser.email.toLowerCase()];
         teamInstitutionInput.value = coachInst;
         teamInstitutionInput.readOnly = true;
         teamInstitutionInput.style.backgroundColor = '#f3f4f6';
     } else {
+        // Admin
+        teamModalTitle.textContent = teamId !== null ? 'Edit Team' : 'Register New Team';
+        if (subtitleEl) subtitleEl.style.display = 'none';
+        if (hintEl) hintEl.style.display = 'none';
+        if (submitBtn) submitBtn.textContent = teamId !== null ? 'Update Team' : 'Save Team';
+
         teamInstitutionInput.readOnly = false;
         teamInstitutionInput.style.backgroundColor = '';
     }
@@ -2918,6 +3024,7 @@ closeTeamModalBtn.onclick = () => teamModal.classList.add('hidden');
 
 teamModalForm.onsubmit = async (e) => {
     e.preventDefault();
+    const role = getUserRole();
     const teamId = teamIdInput.value ? parseInt(teamIdInput.value) : null;
     
     const teamData = {
@@ -2929,6 +3036,22 @@ teamModalForm.onsubmit = async (e) => {
             { name: member2NameInput.value.trim(), email: member2EmailInput.value.trim().toLowerCase() }
         ]
     };
+
+    if (role === 'participant') {
+        showLoading('Submitting team for coach verification...');
+        try {
+            const result = await tournament.submitTeamRequest(teamData);
+            teamModal.classList.add('hidden');
+            showNotification('Success', result.message || 'Team registration submitted to your coach!');
+            await tournament.loadFromStorage();
+            initUI();
+        } catch (error) {
+            showNotification('Error', error.message);
+        } finally {
+            hideLoading();
+        }
+        return;
+    }
 
     showLoading('Saving team...');
     try {
@@ -2952,6 +3075,40 @@ teamModalForm.onsubmit = async (e) => {
     } finally {
         hideLoading();
     }
+};
+
+window.handleApproveTeamRequest = async function(requestId) {
+    showLoading('Approving team registration...');
+    try {
+        const res = await tournament.approveTeamRequest(requestId);
+        showNotification('Success', res.message || 'Team registration approved!');
+        await tournament.loadFromStorage();
+        showEntries();
+    } catch (e) {
+        showNotification('Error', e.message);
+    } finally {
+        hideLoading();
+    }
+};
+
+window.handleRejectTeamRequest = function(requestId) {
+    showConfirm(
+        'Reject Team Registration',
+        'Are you sure you want to decline this student team registration request?',
+        async () => {
+            showLoading('Declining team registration...');
+            try {
+                const res = await tournament.rejectTeamRequest(requestId);
+                showNotification('Success', res.message || 'Team registration request declined.');
+                await tournament.loadFromStorage();
+                showEntries();
+            } catch (e) {
+                showNotification('Error', e.message);
+            } finally {
+                hideLoading();
+            }
+        }
+    );
 };
 
 window.unassignJudge = async function (matchId) {

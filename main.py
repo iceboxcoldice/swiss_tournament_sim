@@ -1270,6 +1270,179 @@ def reject_coach_request_endpoint(tournament_id, coach_email):
         return jsonify({"error": "Failed to save tournament data"}), 500
     return jsonify({"error": f"No pending request found for {email}"}), 404
 
+@app.route('/api/t/<tournament_id>/team_requests', methods=['POST'])
+@require_auth()
+def submit_team_request_endpoint(tournament_id):
+    """Allow students to submit a team entry under an approved coach for verification."""
+    user_info = getattr(request, 'user_info', None)
+    user_email = user_info.get('email', '').lower() if user_info else ''
+    
+    data, teams_objs = patched_load_tournament_with_id(tournament_id)
+    if not data:
+        return jsonify({"error": "Tournament not found"}), 404
+    if data.get('is_closed'):
+        return jsonify({"error": "Tournament is closed"}), 403
+
+    # Cannot register new teams if preliminary matches have already been paired
+    if data.get('matches') and len(data.get('matches')) > 0:
+        return jsonify({"error": "Cannot register new teams after preliminary rounds have been paired"}), 400
+
+    req_data = request.json or {}
+    team_name = req_data.get('name', '').strip()
+    institution = req_data.get('institution', '').strip()
+    members = req_data.get('members', [])
+
+    if not team_name or not institution:
+        return jsonify({"error": "Team name and institution are required"}), 400
+
+    # Verify that the institution has an approved coach
+    auth_data = data.get('auth', {})
+    coach_mapping = auth_data.get('coaches', {})
+    approved_institutions = {inst.lower(): inst for inst in coach_mapping.values()}
+    
+    matched_institution = approved_institutions.get(institution.lower())
+    if not matched_institution:
+        return jsonify({
+            "error": f"Institution '{institution}' does not have an approved coach for this tournament. A coach must be approved first before teams can register under it."
+        }), 400
+
+    # Canonicalize institution casing from coach mapping
+    institution = matched_institution
+
+    if 'team_requests' not in data:
+        data['team_requests'] = {}
+
+    import uuid
+    req_id = f"tr_{uuid.uuid4().hex[:8]}"
+    data['team_requests'][req_id] = {
+        'id': req_id,
+        'name': team_name,
+        'institution': institution,
+        'members': members,
+        'submitted_by': user_email,
+        'submitted_at': datetime.utcnow().isoformat(),
+        'status': 'pending_coach_approval'
+    }
+
+    if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+        return jsonify({
+            "message": f"Team registration submitted to your {institution} coach for approval",
+            "request_id": req_id,
+            "request": data['team_requests'][req_id]
+        }), 200
+    return jsonify({"error": "Failed to save team request"}), 500
+
+@app.route('/api/t/<tournament_id>/team_requests', methods=['GET'])
+@require_auth(allowed_roles=['admin', 'coach'])
+def get_team_requests_endpoint(tournament_id):
+    """List pending team registration requests. Coaches only see requests for their school."""
+    user_info = getattr(request, 'user_info', None)
+    user_email = user_info.get('email', '').lower() if user_info else ''
+
+    data, _ = patched_load_tournament_with_id(tournament_id)
+    if not data:
+        return jsonify({"error": "Tournament not found"}), 404
+
+    auth_data = data.get('auth', {})
+    admin_emails = [e.lower() for e in auth_data.get('admins', [])]
+    coach_mapping = auth_data.get('coaches', {})
+    
+    is_admin = is_super_admin(user_email) or (user_email in admin_emails)
+    coach_institution = coach_mapping.get(user_email)
+
+    requests = data.get('team_requests', {})
+    if is_admin:
+        filtered = requests
+    else:
+        filtered = {k: v for k, v in requests.items() if v.get('institution', '').lower() == (coach_institution or '').lower()}
+
+    return jsonify({"team_requests": filtered}), 200
+
+@app.route('/api/t/<tournament_id>/team_requests/<request_id>/approve', methods=['POST'])
+@require_auth(allowed_roles=['admin', 'coach'])
+def approve_team_request_endpoint(tournament_id, request_id):
+    """Approve a student team registration request and officially add it to the tournament roster."""
+    user_info = getattr(request, 'user_info', None)
+    user_email = user_info.get('email', '').lower() if user_info else ''
+
+    data, teams_objs = patched_load_tournament_with_id(tournament_id)
+    if not data:
+        return jsonify({"error": "Tournament not found"}), 404
+    if data.get('is_closed'):
+        return jsonify({"error": "Tournament is closed"}), 403
+
+    requests = data.get('team_requests', {})
+    if request_id not in requests:
+        return jsonify({"error": f"Team request {request_id} not found"}), 404
+
+    req_entry = requests[request_id]
+    institution = req_entry.get('institution', '')
+
+    auth_data = data.get('auth', {})
+    admin_emails = [e.lower() for e in auth_data.get('admins', [])]
+    coach_mapping = auth_data.get('coaches', {})
+    is_admin = is_super_admin(user_email) or (user_email in admin_emails)
+    coach_institution = coach_mapping.get(user_email)
+
+    if not is_admin and institution.lower() != (coach_institution or '').lower():
+        return jsonify({"error": f"Unauthorized: You can only approve teams for {coach_institution}"}), 403
+
+    # Add team to tournament
+    del requests[request_id]
+    max_id = max([t.id for t in teams_objs] + [-1])
+    new_team = tm.Team(
+        id=max_id + 1,
+        name=req_entry['name'],
+        institution=institution,
+        members=req_entry.get('members', [])
+    )
+    teams_objs.append(new_team)
+    if 'config' in data and isinstance(data['config'], dict):
+        data['config']['num_teams'] = len(teams_objs)
+
+    if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+        return jsonify({
+            "message": f"Team '{new_team.name}' approved and registered successfully",
+            "team_id": new_team.id,
+            "team_requests": requests
+        }), 200
+    return jsonify({"error": "Failed to save team registration"}), 500
+
+@app.route('/api/t/<tournament_id>/team_requests/<request_id>/reject', methods=['POST'])
+@require_auth(allowed_roles=['admin', 'coach'])
+def reject_team_request_endpoint(tournament_id, request_id):
+    """Reject and remove a student team registration request."""
+    user_info = getattr(request, 'user_info', None)
+    user_email = user_info.get('email', '').lower() if user_info else ''
+
+    data, teams_objs = patched_load_tournament_with_id(tournament_id)
+    if not data:
+        return jsonify({"error": "Tournament not found"}), 404
+
+    requests = data.get('team_requests', {})
+    if request_id not in requests:
+        return jsonify({"error": f"Team request {request_id} not found"}), 404
+
+    req_entry = requests[request_id]
+    institution = req_entry.get('institution', '')
+
+    auth_data = data.get('auth', {})
+    admin_emails = [e.lower() for e in auth_data.get('admins', [])]
+    coach_mapping = auth_data.get('coaches', {})
+    is_admin = is_super_admin(user_email) or (user_email in admin_emails)
+    coach_institution = coach_mapping.get(user_email)
+
+    if not is_admin and institution.lower() != (coach_institution or '').lower():
+        return jsonify({"error": f"Unauthorized: You can only reject teams for {coach_institution}"}), 403
+
+    del requests[request_id]
+    if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+        return jsonify({
+            "message": "Team registration request rejected",
+            "team_requests": requests
+        }), 200
+    return jsonify({"error": "Failed to save tournament data"}), 500
+
 @app.route('/api/user/super_admin_status', methods=['GET'])
 @require_auth()
 def get_super_admin_status():

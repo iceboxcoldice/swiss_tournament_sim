@@ -784,6 +784,98 @@ class TournamentManager {
         }
     }
 
+    // Submit team registration request for coach approval
+    async submitTeamRequest(teamData) {
+        if (!this.backendUrl || !this.tournamentId) {
+            // Local fallback: register directly
+            const maxId = Math.max(...this.teams.map(t => t.id), -1);
+            teamData.id = maxId + 1;
+            const newTeam = new Team(teamData.id, 0, teamData.name, teamData.members);
+            newTeam.institution = teamData.institution;
+            this.teams.push(newTeam);
+            this.data.teams = this.teams.map(t => t.toJSON());
+            this.data.config.num_teams = this.teams.length;
+            this.saveToStorage();
+            return { message: "Team registered successfully!", team_id: newTeam.id };
+        }
+
+        const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/team_requests`, {
+            method: 'POST',
+            headers: this.getAuthHeaders(),
+            body: JSON.stringify(teamData)
+        });
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'Failed to submit team request');
+        }
+        return await response.json();
+    }
+
+    // Fetch pending team registration requests
+    async fetchTeamRequests() {
+        if (!this.backendUrl || !this.tournamentId) {
+            return (this.data && this.data.team_requests) || {};
+        }
+        try {
+            const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/team_requests`, {
+                headers: this.getAuthHeaders()
+            });
+            if (response.ok) {
+                const res = await response.json();
+                if (this.data) {
+                    this.data.team_requests = res.team_requests || {};
+                    this.saveToStorage();
+                }
+                return res.team_requests || {};
+            }
+        } catch (e) {
+            console.error("Failed to fetch team requests:", e);
+        }
+        return (this.data && this.data.team_requests) || {};
+    }
+
+    // Approve a student team registration request (Coach/Admin)
+    async approveTeamRequest(requestId) {
+        if (this.backendUrl && this.tournamentId) {
+            const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/team_requests/${requestId}/approve`, {
+                method: 'POST',
+                headers: this.getAuthHeaders()
+            });
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || 'Failed to approve team request');
+            }
+            const res = await response.json();
+            // Refresh full tournament data
+            await this.loadFromStorage();
+            return res;
+        } else {
+            return { success: true };
+        }
+    }
+
+    // Reject a student team registration request (Coach/Admin)
+    async rejectTeamRequest(requestId) {
+        if (this.backendUrl && this.tournamentId) {
+            const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/team_requests/${requestId}/reject`, {
+                method: 'POST',
+                headers: this.getAuthHeaders()
+            });
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || 'Failed to reject team request');
+            }
+            const res = await response.json();
+            if (this.data && this.data.team_requests) {
+                delete this.data.team_requests[requestId];
+                this.saveToStorage();
+            }
+            return res;
+        } else {
+            return { success: true };
+        }
+    }
+
     // Approve a pending tournament (Super Admin)
     async approveTournament(tournamentId) {
         if (!this.backendUrl) return { status: 'approved' };
