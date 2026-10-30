@@ -424,8 +424,17 @@ if (closeBackendBtn) {
 
 if (saveBackendBtn) {
     saveBackendBtn.addEventListener('click', async () => {
-        const url = backendUrlInput.value.trim();
+        let url = backendUrlInput.value.trim();
         if (url) {
+            // Normalize URL protocol and strip trailing slashes
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                url = 'https://' + url;
+            }
+            if (url.includes('.appspot.com') && url.startsWith('http://')) {
+                url = url.replace('http://', 'https://');
+            }
+            url = url.replace(/\/+$/, '');
+
             showLoading('Connecting to backend...');
             try {
                 const response = await fetch(`${url}/api/health`);
@@ -436,7 +445,6 @@ if (saveBackendBtn) {
                     backendConfigModal.classList.add('hidden');
                     showNotification('Connected', 'Successfully connected to backend.');
 
-                    // Sync data?
                     // Fetch latest data from cloud instead of relying on stale local data
                     await tournament.loadFromStorage();
                     initUI();
@@ -449,10 +457,13 @@ if (saveBackendBtn) {
                 hideLoading();
             }
         } else {
-            // Clear backend
+            // Clear backend and explicitly stay in local mode
             tournament.setBackendUrl(null);
-            localStorage.removeItem('backendUrl');
+            localStorage.setItem('backendUrl', 'local');
             updateConnectionStatus(false);
+            backendConfigModal.classList.add('hidden');
+            initUI();
+        }
             backendConfigModal.classList.add('hidden');
             initUI();
         }

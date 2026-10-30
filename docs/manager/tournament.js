@@ -141,6 +141,16 @@ class TournamentManager {
     }
 
     setBackendUrl(url) {
+        if (url && typeof url === 'string') {
+            url = url.trim();
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                url = 'https://' + url;
+            }
+            if (url.includes('.appspot.com') && url.startsWith('http://')) {
+                url = url.replace('http://', 'https://');
+            }
+            url = url.replace(/\/+$/, '');
+        }
         this.backendUrl = url;
         if (url) {
             localStorage.setItem('backendUrl', url);
@@ -156,13 +166,17 @@ class TournamentManager {
 
     async loadFromStorage() {
         // Try to load backend URL and tournament ID first
-        const savedUrl = localStorage.getItem('backendUrl');
+        let savedUrl = localStorage.getItem('backendUrl');
         if (savedUrl) {
             if (savedUrl.includes('github.io')) {
                 localStorage.removeItem('backendUrl');
                 this.backendUrl = null;
             } else {
-                this.backendUrl = savedUrl;
+                if (savedUrl.includes('.appspot.com') && savedUrl.startsWith('http://')) {
+                    savedUrl = savedUrl.replace('http://', 'https://');
+                    localStorage.setItem('backendUrl', savedUrl);
+                }
+                this.backendUrl = savedUrl.replace(/\/+$/, '');
             }
         } else if (typeof window !== 'undefined' && window.location.origin) {
             const hostname = window.location.hostname || '';
