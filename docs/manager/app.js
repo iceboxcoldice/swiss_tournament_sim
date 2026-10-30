@@ -82,12 +82,13 @@ function isSuperAdmin() {
 }
 
 async function checkSuperAdminStatus() {
-    if (!tournament.backendUrl || !currentUser) {
+    const backendUrl = tournament.getEffectiveBackendUrl ? tournament.getEffectiveBackendUrl() : (tournament.backendUrl || '');
+    if (!backendUrl || !currentUser) {
         isSuperAdminUser = false;
         return;
     }
     try {
-        const res = await fetch(`${tournament.backendUrl}/api/user/super_admin_status`, {
+        const res = await fetch(`${backendUrl}/api/user/super_admin_status`, {
             headers: tournament.getAuthHeaders()
         });
         if (res.ok) {
@@ -181,6 +182,7 @@ async function handleCredentialResponse(response) {
     // Refresh current view to apply role-based access
     initUI();
 }
+window.handleCredentialResponse = handleCredentialResponse;
 
 function signOut() {
     localStorage.removeItem('googleAuthToken');
@@ -1429,7 +1431,6 @@ window.handleStartTournament = async function () {
         hideLoading();
     }
 };
-}
 
 // Show Judges
 function showJudges() {
@@ -3013,7 +3014,8 @@ window.linkSecondaryEmail = async function () {
 
     showLoading(`Linking ${email}...`);
     try {
-        const response = await fetch(`${tournament.backendUrl}/api/user/link_email`, {
+        const backendUrl = tournament.getEffectiveBackendUrl ? tournament.getEffectiveBackendUrl() : (tournament.backendUrl || '');
+        const response = await fetch(`${backendUrl}/api/user/link_email`, {
             method: 'POST',
             headers: tournament.getAuthHeaders(),
             body: JSON.stringify({ secondary_email: email })
@@ -3161,7 +3163,8 @@ teamModalForm.onsubmit = async (e) => {
 
     showLoading('Saving team...');
     try {
-        const response = await fetch(`${tournament.backendUrl}/api/t/${tournament.tournamentId}/register_team`, {
+        const backendUrl = tournament.getEffectiveBackendUrl ? tournament.getEffectiveBackendUrl() : (tournament.backendUrl || '');
+        const response = await fetch(`${backendUrl}/api/t/${tournament.tournamentId}/register_team`, {
             method: 'POST',
             headers: tournament.getAuthHeaders(),
             body: JSON.stringify(teamData)

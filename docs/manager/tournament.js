@@ -62,6 +62,19 @@ class TournamentManager {
         const token = localStorage.getItem('googleAuthToken');
         if (token) {
             baseHeaders['Authorization'] = `Bearer ${token}`;
+            try {
+                const parts = token.split('.');
+                if (parts.length === 3) {
+                    const base64Url = parts[1];
+                    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                    const payload = JSON.parse(decodeURIComponent(atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')));
+                    if (payload.email) {
+                        baseHeaders['X-User-Email'] = payload.email;
+                    }
+                }
+            } catch (e) {
+                // Ignore parse errors for custom tokens
+            }
         }
         return baseHeaders;
     }
@@ -122,6 +135,8 @@ class TournamentManager {
         const savedUrl = localStorage.getItem('backendUrl');
         if (savedUrl) {
             this.backendUrl = savedUrl;
+        } else if (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http')) {
+            this.backendUrl = window.location.origin;
         }
         const savedId = localStorage.getItem('tournamentId');
         if (savedId) {
