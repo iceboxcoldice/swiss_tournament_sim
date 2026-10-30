@@ -2526,8 +2526,17 @@ async function fetchTournaments() {
         }
     }
 
+    let registeredUsers = [];
+    if (isSuperAdmin()) {
+        try {
+            registeredUsers = await tournament.getRegisteredUsers();
+        } catch (e) {
+            console.warn("Could not fetch registered users:", e);
+        }
+    }
+
     if (tournamentHubGrid) {
-        renderHubGrid(allTournaments);
+        renderHubGrid(allTournaments, registeredUsers);
     }
 }
 
@@ -2549,7 +2558,7 @@ function getLocalTournaments() {
     return ids;
 }
 
-function renderHubGrid(tournaments) {
+function renderHubGrid(tournaments, registeredUsers = []) {
     if (!tournamentHubGrid) return;
     tournamentHubGrid.innerHTML = '';
 
@@ -2568,6 +2577,36 @@ function renderHubGrid(tournaments) {
     const pending = tournaments.filter(t => t.status === 'pending');
     const active = tournaments.filter(t => !t.is_closed && t.status !== 'pending');
     const closed = tournaments.filter(t => t.is_closed && t.status !== 'pending');
+
+    const renderPendingUsersSection = (users) => {
+        if (!users || users.length === 0 || !isSuperAdmin()) return '';
+        const pendingUsers = users.filter(u => u.status === 'pending');
+        if (pendingUsers.length === 0) return '';
+
+        return `
+            <div class="hub-category">
+                <h2 style="margin: 2rem 0 1rem 0; padding-bottom: 0.5rem; border-bottom: 2px solid #3b82f6; display: flex; justify-content: space-between; align-items: center; color: #1d4ed8;">
+                    👥 User Registration Requests (Testing Mode)
+                    <span style="font-size: 0.8rem; background: #dbeafe; color: #1d4ed8; padding: 0.2rem 0.6rem; border-radius: 20px;">${pendingUsers.length}</span>
+                </h2>
+                <div class="tournament-grid">
+                    ${pendingUsers.map(u => `
+                        <div class="tournament-card" style="border-color: #3b82f6; background: #eff6ff;">
+                            <div class="tournament-id" style="color: #1d4ed8;">${u.email}</div>
+                            <h3>${u.name || u.email.split('@')[0]}</h3>
+                            <div class="text-muted" style="font-size: 0.85em; margin-top: 0.25rem;">
+                                ${u.institution ? `🏫 ${u.institution}` : 'Platform user'}
+                            </div>
+                            <div style="margin-top: 1rem; display: flex; gap: 0.5rem; justify-content: flex-end;">
+                                <button class="btn btn-sm btn-primary" onclick="handleApproveUser('${u.email}')">Approve User</button>
+                                <button class="btn btn-sm btn-danger" onclick="handleRejectUser('${u.email}')">Reject</button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    };
 
     const renderPendingSection = (list) => {
         if (list.length === 0) return '';
@@ -2650,11 +2689,44 @@ function renderHubGrid(tournaments) {
     };
 
     tournamentHubGrid.innerHTML = `
+        ${renderPendingUsersSection(registeredUsers)}
         ${renderPendingSection(pending)}
         ${renderSection('Active Tournaments', active)}
         ${renderSection('Closed Archive', closed)}
     `;
 }
+
+window.handleApproveUser = async (email) => {
+    showLoading(`Approving user ${email}...`);
+    try {
+        await tournament.approveUser(email);
+        showNotification('Success', `User ${email} has been approved!`);
+        await fetchTournaments();
+    } catch (e) {
+        showNotification('Error', e.message);
+    } finally {
+        hideLoading();
+    }
+};
+
+window.handleRejectUser = (email) => {
+    showConfirm(
+        'Reject User Registration',
+        `Are you sure you want to reject user registration for "${email}"?`,
+        async () => {
+            showLoading(`Rejecting user ${email}...`);
+            try {
+                await tournament.rejectUser(email);
+                showNotification('Success', `User ${email} registration rejected.`);
+                await fetchTournaments();
+            } catch (e) {
+                showNotification('Error', e.message);
+            } finally {
+                hideLoading();
+            }
+        }
+    );
+};
 
 window.handleApproveTournament = async (tId) => {
     showLoading(`Approving tournament ${tId}...`);

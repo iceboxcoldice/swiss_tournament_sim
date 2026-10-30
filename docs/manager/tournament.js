@@ -1105,10 +1105,91 @@ class TournamentManager {
             headers: this.getAuthHeaders()
         });
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Failed to reject tournament');
+            const error = await safeJson(response);
+            throw new Error((error && error.error) || 'Failed to reject tournament');
         }
-        return await response.json();
+        return await safeJson(response);
+    }
+
+    // Get user registration and approval status
+    async getUserStatus() {
+        const backend = this.getEffectiveBackendUrl();
+        if (!backend) return { is_approved: true, status: 'approved' };
+        try {
+            const response = await fetch(`${backend}/api/user/status`, {
+                headers: this.getAuthHeaders({})
+            });
+            if (response.ok) {
+                return await safeJson(response) || { is_approved: true, status: 'approved' };
+            }
+        } catch (e) {
+            console.warn("Could not check user status:", e);
+        }
+        return { is_approved: true, status: 'approved' };
+    }
+
+    // Submit user registration request
+    async requestUserRegistration(name, institution = '', intent = '') {
+        const backend = this.getEffectiveBackendUrl();
+        if (!backend) return { success: true };
+        const response = await fetch(`${backend}/api/user/register`, {
+            method: 'POST',
+            headers: this.getAuthHeaders(),
+            body: JSON.stringify({ name, institution, intent })
+        });
+        if (!response.ok) {
+            const err = await safeJson(response);
+            throw new Error((err && err.error) || 'Failed to submit user registration');
+        }
+        return await safeJson(response);
+    }
+
+    // List registered users (Super Admin only)
+    async getRegisteredUsers() {
+        const backend = this.getEffectiveBackendUrl();
+        if (!backend) return [];
+        try {
+            const response = await fetch(`${backend}/api/admin/users`, {
+                headers: this.getAuthHeaders({})
+            });
+            if (response.ok) {
+                const res = await safeJson(response);
+                return (res && res.users) || [];
+            }
+        } catch (e) {
+            console.error("Could not fetch registered users:", e);
+        }
+        return [];
+    }
+
+    // Approve a user registration (Super Admin only)
+    async approveUser(email) {
+        const backend = this.getEffectiveBackendUrl();
+        if (!backend) return { success: true };
+        const response = await fetch(`${backend}/api/admin/users/${encodeURIComponent(email)}/approve`, {
+            method: 'POST',
+            headers: this.getAuthHeaders()
+        });
+        if (!response.ok) {
+            const err = await safeJson(response);
+            throw new Error((err && err.error) || 'Failed to approve user');
+        }
+        return await safeJson(response);
+    }
+
+    // Reject a user registration (Super Admin only)
+    async rejectUser(email) {
+        const backend = this.getEffectiveBackendUrl();
+        if (!backend) return { success: true };
+        const response = await fetch(`${backend}/api/admin/users/${encodeURIComponent(email)}/reject`, {
+            method: 'POST',
+            headers: this.getAuthHeaders()
+        });
+        if (!response.ok) {
+            const err = await safeJson(response);
+            throw new Error((err && err.error) || 'Failed to reject user');
+        }
+        return await safeJson(response);
     }
 
     // Assign a judge to a match
