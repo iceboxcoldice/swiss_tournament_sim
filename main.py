@@ -13,16 +13,20 @@ import tournament_manager as tm
 import swiss_sim
 
 app = Flask(__name__, static_folder='docs/manager', static_url_path='')
-# Enable CORS for GitHub Pages and local development
+# Enable CORS for GitHub Pages, local development, and external frontends
 CORS(app, resources={
     r"/api/*": {
-        "origins": [
-            "https://iceboxcoldice.github.io",
-            "http://localhost:*",
-            "http://127.0.0.1:*"
+        "origins": "*",
+        "allow_headers": [
+            "Content-Type",
+            "Authorization",
+            "X-User-Email",
+            "Cache-Control",
+            "Pragma",
+            "Expires",
+            "X-Requested-With"
         ],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "methods": ["GET", "POST", "OPTIONS"],
+        "methods": ["GET", "POST", "DELETE", "PUT", "OPTIONS"],
         "supports_credentials": False
     }
 })
