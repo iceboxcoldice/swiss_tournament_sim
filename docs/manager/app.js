@@ -449,9 +449,9 @@ if (saveBackendBtn) {
                 hideLoading();
             }
         } else {
-            // Clear backend and explicitly stay in local mode
+            // Clear backend
             tournament.setBackendUrl(null);
-            localStorage.setItem('backendUrl', 'local');
+            localStorage.removeItem('backendUrl');
             updateConnectionStatus(false);
             backendConfigModal.classList.add('hidden');
             initUI();
