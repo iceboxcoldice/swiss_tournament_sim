@@ -1,6 +1,8 @@
 node_modules/
 package-lock.json
 verification/browser_test_storage/
+verification/screenshots/
+teams.txt
 __pycache__/
 .DS_Store
 *.pyc
