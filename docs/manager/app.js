@@ -139,7 +139,10 @@ function getUserRole() {
 function parseJwt(token) {
     try {
         const base64Url = token.split('.')[1];
-        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        while (base64.length % 4 !== 0) {
+            base64 += '=';
+        }
         const jsonPayload = decodeURIComponent(atob(base64).split('').map(function (c) {
             return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
         }).join(''));
@@ -2473,23 +2476,21 @@ async function fetchTournaments() {
     let cloudTournaments = [];
     let localTournaments = getLocalTournaments();
 
-    // Default to current host if no backendUrl is set (useful for Docker/bundled mode)
-    const effectiveBackendUrl = tournament.backendUrl || window.location.origin;
+    // Only query backend if explicitly configured or running on a local server
+    const effectiveBackendUrl = tournament.getEffectiveBackendUrl ? tournament.getEffectiveBackendUrl() : tournament.backendUrl;
 
-    // Try to fetch from cloud/backend first
-    try {
-        const url = `${effectiveBackendUrl}/api/tournaments`;
-        const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
-        if (response.ok) {
-            const result = await response.json();
-            cloudTournaments = result.tournaments || [];
-
-            // If we're not already in cloud mode but the backend responds, 
-            // maybe we should suggest connecting or just use it.
-            // For now, if we found tournaments, we show them.
+    if (effectiveBackendUrl) {
+        // Try to fetch from cloud/backend first
+        try {
+            const url = `${effectiveBackendUrl}/api/tournaments`;
+            const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
+            if (response.ok) {
+                const result = await response.json().catch(() => null);
+                cloudTournaments = (result && result.tournaments) || [];
+            }
+        } catch (e) {
+            console.warn("Could not fetch tournaments from backend:", e.message);
         }
-    } catch (e) {
-        console.warn("Could not fetch tournaments from backend:", e.message);
     }
 
     // Merge lists. Determine unique IDs first to prevent duplicates.

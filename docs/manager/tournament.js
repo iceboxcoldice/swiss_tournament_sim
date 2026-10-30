@@ -36,6 +36,14 @@ class Judge {
     }
 }
 
+async function safeJson(response) {
+    try {
+        return await response.json();
+    } catch (_) {
+        return null;
+    }
+}
+
 class TournamentManager {
     constructor() {
         this.data = null;
@@ -66,9 +74,12 @@ class TournamentManager {
                 const parts = token.split('.');
                 if (parts.length === 3) {
                     const base64Url = parts[1];
-                    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                    let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                    while (base64.length % 4 !== 0) {
+                        base64 += '=';
+                    }
                     const payload = JSON.parse(decodeURIComponent(atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join('')));
-                    if (payload.email) {
+                    if (payload && payload.email) {
                         baseHeaders['X-User-Email'] = payload.email;
                     }
                 }
@@ -113,16 +124,29 @@ class TournamentManager {
 
     /**
      * Returns the effective backend URL.
-     * Falls back to window.location.origin when served from a backend (e.g. Docker)
+     * Falls back to window.location.origin only when served from a local backend (e.g. Docker / local dev server)
      * but no explicit backendUrl was configured via the Cloud modal.
+     * Static hosts like GitHub Pages (*.github.io) or file:// are never treated as backend servers.
      */
     getEffectiveBackendUrl() {
-        return this.backendUrl || (typeof window !== 'undefined' ? window.location.origin : null);
+        if (this.backendUrl) return this.backendUrl;
+        if (typeof window !== 'undefined' && window.location.origin) {
+            const hostname = window.location.hostname || '';
+            const isStaticHost = hostname.endsWith('github.io') || window.location.protocol === 'file:';
+            if (!isStaticHost && (hostname === 'localhost' || hostname === '127.0.0.1' || (window.location.port && window.location.port !== '80' && window.location.port !== '443'))) {
+                return window.location.origin;
+            }
+        }
+        return null;
     }
 
     setBackendUrl(url) {
         this.backendUrl = url;
-        localStorage.setItem('backendUrl', url);
+        if (url) {
+            localStorage.setItem('backendUrl', url);
+        } else {
+            localStorage.removeItem('backendUrl');
+        }
     }
 
     setTournamentId(id) {
@@ -134,9 +158,20 @@ class TournamentManager {
         // Try to load backend URL and tournament ID first
         const savedUrl = localStorage.getItem('backendUrl');
         if (savedUrl) {
-            this.backendUrl = savedUrl;
-        } else if (typeof window !== 'undefined' && window.location.origin && window.location.origin.startsWith('http')) {
-            this.backendUrl = window.location.origin;
+            if (savedUrl.includes('github.io')) {
+                localStorage.removeItem('backendUrl');
+                this.backendUrl = null;
+            } else {
+                this.backendUrl = savedUrl;
+            }
+        } else if (typeof window !== 'undefined' && window.location.origin) {
+            const hostname = window.location.hostname || '';
+            const isStaticHost = hostname.endsWith('github.io') || window.location.protocol === 'file:';
+            if (!isStaticHost && (hostname === 'localhost' || hostname === '127.0.0.1' || (window.location.port && window.location.port !== '80' && window.location.port !== '443'))) {
+                this.backendUrl = window.location.origin;
+            } else {
+                this.backendUrl = null;
+            }
         }
         const savedId = localStorage.getItem('tournamentId');
         if (savedId) {
@@ -148,7 +183,7 @@ class TournamentManager {
         this.teams = [];
         this.judges = [];
 
-        const effectiveBackendUrl = this.backendUrl || (typeof window !== 'undefined' ? window.location.origin : null);
+        const effectiveBackendUrl = this.getEffectiveBackendUrl();
 
         if (effectiveBackendUrl) {
             // Cloud/Bundled Backend Mode
@@ -159,12 +194,12 @@ class TournamentManager {
                     signal: AbortSignal.timeout(2000)
                 });
                 if (response.ok) {
-                    const data = await response.json();
-                    this.data = data;
-                    this.reconstructObjects();
-                    // If we successfully hit the backend but didn't have a URL set, 
-                    // we might want to capture it, but for now just using the data is enough.
-                    return;
+                    const data = await safeJson(response);
+                    if (data) {
+                        this.data = data;
+                        this.reconstructObjects();
+                        return;
+                    }
                 } else if (!this.backendUrl && response.status === 404) {
                     // In bundled mode, if 404, we don't necessarily bail to localStorage yet
                     // because the backend is THE source of truth for its own IDs.
@@ -278,10 +313,11 @@ class TournamentManager {
     // Initialize new tournament
     // teamDetails: array of {name, institution, members: [{name}, {name}]}
     async init(numTeams, numPrelimRounds, numElimRounds, teamDetails = []) {
-        if (this.backendUrl) {
+        const backend = this.getEffectiveBackendUrl();
+        if (backend) {
             // Cloud Mode
             try {
-                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/init`, {
+                const response = await fetch(`${backend}/api/t/${this.tournamentId}/init`, {
                     method: 'POST',
                     headers: this.getAuthHeaders(),
                     body: JSON.stringify({
@@ -293,28 +329,29 @@ class TournamentManager {
                 });
 
                 if (response.ok) {
-                    const result = await response.json();
+                    const result = await safeJson(response);
                     console.log('Backend init successful:', result);
 
                     // Reload full data from backend
-                    const dataResponse = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/data?_=${Date.now()}`, {
+                    const dataResponse = await fetch(`${backend}/api/t/${this.tournamentId}/data?_=${Date.now()}`, {
                         cache: 'no-store',
                         headers: this.getAuthHeaders({})
                     });
                     if (dataResponse.ok) {
-                        const data = await dataResponse.json();
-                        console.log('Fetched data from backend:', data);
-                        this.data = data;
-                        this.reconstructObjects();
-                        console.log('Data loaded from backend after init. this.data is now:', this.data);
-                        return true;
-                    } else {
-                        console.error('Failed to load data after init');
-                        return false;
+                        const data = await safeJson(dataResponse);
+                        if (data) {
+                            console.log('Fetched data from backend:', data);
+                            this.data = data;
+                            this.reconstructObjects();
+                            console.log('Data loaded from backend after init. this.data is now:', this.data);
+                            return true;
+                        }
                     }
+                    console.error('Failed to load data after init');
+                    return false;
                 } else {
-                    const error = await response.json();
-                    throw new Error(error.error || 'Backend init failed');
+                    const error = await safeJson(response);
+                    throw new Error((error && error.error) || `HTTP ${response.status}: ${response.statusText || 'Backend init failed'}`);
                 }
             } catch (e) {
                 console.error("Cloud init failed:", e);
@@ -366,31 +403,37 @@ class TournamentManager {
 
     // Start tournament, lock registration, and optionally generate Round 1 pairings
     async startTournament(pairRound1 = true) {
-        if (!this.backendUrl) {
+        const backend = this.getEffectiveBackendUrl();
+        if (!backend) {
+            if (!this.data) {
+                return { success: false, error: 'No tournament loaded' };
+            }
             this.data.is_started = true;
             if (pairRound1 && (!this.data.matches || this.data.matches.length === 0)) {
                 await this.pairRound(1);
             }
+            this.saveToStorage();
             return { success: true, message: 'Tournament started.' };
         }
         try {
-            const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/start`, {
+            const response = await fetch(`${backend}/api/t/${this.tournamentId}/start`, {
                 method: 'POST',
                 headers: this.getAuthHeaders(),
                 body: JSON.stringify({ pair_round_1: pairRound1 })
             });
             if (response.ok) {
-                const res = await response.json();
+                const res = await safeJson(response) || {};
                 this.data.is_started = true;
                 if (res.matches && res.matches.length > 0) {
                     this.data.matches = res.matches;
                     this.data.current_round = 1;
                 }
                 this.reconstructObjects();
-                return { success: true, message: res.message };
+                return { success: true, message: res.message || 'Tournament started.' };
             } else {
-                const err = await response.json();
-                return { success: false, error: err.error || 'Failed to start tournament' };
+                const err = await safeJson(response);
+                const errorMsg = (err && err.error) ? err.error : `HTTP ${response.status}: ${response.statusText || 'Failed to start tournament'}`;
+                return { success: false, error: errorMsg };
             }
         } catch (e) {
             return { success: false, error: e.message };
@@ -399,17 +442,18 @@ class TournamentManager {
 
     // Generate pairings for a round using Swiss system
     async pairRound(roundNum) {
-        if (this.backendUrl) {
+        const backend = this.getEffectiveBackendUrl();
+        if (backend) {
             // Cloud Mode
             try {
-                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/pair`, {
+                const response = await fetch(`${backend}/api/t/${this.tournamentId}/pair`, {
                     method: 'POST',
                     headers: this.getAuthHeaders(),
                     body: JSON.stringify({ round: roundNum })
                 });
 
                 if (response.ok) {
-                    const result = await response.json();
+                    const result = await safeJson(response) || {};
                     // Directly merge new matches into local data instead of re-fetching
                     // (re-fetching /api/data can return stale cached response)
                     if (result.matches && this.data) {
@@ -426,10 +470,10 @@ class TournamentManager {
                         window.dispatchEvent(new CustomEvent('tournamentSyncComplete'));
                     }
                     // Removed background loadFromStorage() to avoid race condition
-                    return result.matches;
+                    return result.matches || [];
                 } else {
-                    const err = await response.json();
-                    throw new Error(err.error || 'Backend pairing failed');
+                    const err = await safeJson(response);
+                    throw new Error((err && err.error) || `HTTP ${response.status}: ${response.statusText || 'Backend pairing failed'}`);
                 }
             } catch (e) {
                 console.error("Cloud pairing failed:", e);
