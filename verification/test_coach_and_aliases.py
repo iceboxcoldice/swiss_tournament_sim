@@ -227,5 +227,115 @@ class TestCoachAndAliases(unittest.TestCase):
             self.assertEqual(res.status_code, 200)
             self.assertEqual(res.get_json()['email'], primary_email)
 
+    def test_super_admin_status(self):
+        with patch('main.GOOGLE_OAUTH_CLIENT_ID', 'test-client-id'), \
+             patch('main.verify_google_token') as mock_verify:
+            
+            # Non-super admin
+            mock_verify.return_value = {'email': 'regular_user@example.com'}
+            res = self.app.get(
+                '/api/user/super_admin_status',
+                headers={'Authorization': 'Bearer user-token'}
+            )
+            self.assertEqual(res.status_code, 200)
+            self.assertFalse(res.get_json()['is_super_admin'])
+
+            # Super admin (coldice@gmail.com default)
+            mock_verify.return_value = {'email': 'coldice@gmail.com'}
+            res = self.app.get(
+                '/api/user/super_admin_status',
+                headers={'Authorization': 'Bearer super-token'}
+            )
+            self.assertEqual(res.status_code, 200)
+            self.assertTrue(res.get_json()['is_super_admin'])
+
+    def test_tournament_creation_approval_workflow(self):
+        with patch('main.GOOGLE_OAUTH_CLIENT_ID', 'test-client-id'), \
+             patch('main.verify_google_token') as mock_verify:
+            
+            # 1. Regular user creates a tournament -> status should be 'pending'
+            mock_verify.return_value = {'email': 'organizer@school.edu'}
+            res = self.app.post(
+                '/api/t/spring-invite/init',
+                headers={'Authorization': 'Bearer user-token'},
+                json={
+                    'num_teams': 4,
+                    'rounds': 2,
+                    'elim_rounds': 0,
+                    'teams': [{'name': f'Team {i}', 'institution': 'Test'} for i in range(4)]
+                }
+            )
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(res.get_json()['status'], 'pending')
+            self.assertIn('pending super admin approval', res.get_json()['message'])
+
+            # Verify tournament listing shows status 'pending'
+            res = self.app.get('/api/tournaments')
+            self.assertEqual(res.status_code, 200)
+            tournaments = res.get_json()['tournaments']
+            pending_tourn = next((t for t in tournaments if t['id'] == 'spring-invite'), None)
+            self.assertIsNotNone(pending_tourn)
+            self.assertEqual(pending_tourn['status'], 'pending')
+            self.assertEqual(pending_tourn['requested_by'], 'organizer@school.edu')
+
+            # 2. Regular user tries to pair rounds while pending -> 403 Forbidden
+            res = self.app.post(
+                '/api/t/spring-invite/pair',
+                headers={'Authorization': 'Bearer user-token'},
+                json={'round': 1}
+            )
+            self.assertEqual(res.status_code, 403)
+            self.assertIn('pending approval', res.get_json()['error'])
+
+            # 3. Regular user tries to approve -> 403 Forbidden
+            res = self.app.post(
+                '/api/t/spring-invite/approve',
+                headers={'Authorization': 'Bearer user-token'}
+            )
+            self.assertEqual(res.status_code, 403)
+
+            # 4. Super Admin approves tournament -> 200 Success
+            mock_verify.return_value = {'email': 'coldice@gmail.com'}
+            res = self.app.post(
+                '/api/t/spring-invite/approve',
+                headers={'Authorization': 'Bearer super-token'}
+            )
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(res.get_json()['status'], 'approved')
+
+            # Verify tournament is now approved
+            t_data, _ = main.patched_load_tournament_with_id('spring-invite')
+            self.assertEqual(t_data['status'], 'approved')
+            self.assertEqual(t_data['approved_by'], 'coldice@gmail.com')
+
+            # 5. Super Admin creates a tournament -> should be auto-approved immediately
+            res = self.app.post(
+                '/api/t/super-cup/init',
+                headers={'Authorization': 'Bearer super-token'},
+                json={
+                    'num_teams': 2,
+                    'rounds': 1,
+                    'elim_rounds': 0
+                }
+            )
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(res.get_json()['status'], 'approved')
+
+            # 6. Super Admin rejects a pending tournament request
+            mock_verify.return_value = {'email': 'someone@school.edu'}
+            self.app.post(
+                '/api/t/bad-request/init',
+                headers={'Authorization': 'Bearer someone-token'},
+                json={'num_teams': 2, 'rounds': 1}
+            )
+            mock_verify.return_value = {'email': 'coldice@gmail.com'}
+            res = self.app.post(
+                '/api/t/bad-request/reject',
+                headers={'Authorization': 'Bearer super-token'}
+            )
+            self.assertEqual(res.status_code, 200)
+            data, _ = main.patched_load_tournament_with_id('bad-request')
+            self.assertFalse(data)
+
 if __name__ == '__main__':
     unittest.main()

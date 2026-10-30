@@ -677,6 +677,34 @@ class TournamentManager {
         }
     }
 
+    // Approve a pending tournament (Super Admin)
+    async approveTournament(tournamentId) {
+        if (!this.backendUrl) return { status: 'approved' };
+        const response = await fetch(`${this.backendUrl}/api/t/${tournamentId}/approve`, {
+            method: 'POST',
+            headers: this.getAuthHeaders()
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to approve tournament');
+        }
+        return await response.json();
+    }
+
+    // Reject and delete a pending tournament (Super Admin)
+    async rejectTournament(tournamentId) {
+        if (!this.backendUrl) return { status: 'rejected' };
+        const response = await fetch(`${this.backendUrl}/api/t/${tournamentId}/reject`, {
+            method: 'POST',
+            headers: this.getAuthHeaders()
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to reject tournament');
+        }
+        return await response.json();
+    }
+
     // Assign a judge to a match
     async assignJudgeToMatch(matchId, judgeId) {
         const match = this.data.matches.find(m => m.match_id === matchId);

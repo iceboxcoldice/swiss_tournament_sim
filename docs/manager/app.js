@@ -73,11 +73,40 @@ tournament.onSyncStatusChange = (isSyncing) => {
 // Auth State Management
 let currentUser = null;
 
+let isSuperAdminUser = false;
+
+function isSuperAdmin() {
+    if (!currentUser || !currentUser.email) return false;
+    const email = currentUser.email.toLowerCase().trim();
+    return email === 'coldice@gmail.com' || isSuperAdminUser;
+}
+
+async function checkSuperAdminStatus() {
+    if (!tournament.backendUrl || !currentUser) {
+        isSuperAdminUser = false;
+        return;
+    }
+    try {
+        const res = await fetch(`${tournament.backendUrl}/api/user/super_admin_status`, {
+            headers: tournament.getAuthHeaders()
+        });
+        if (res.ok) {
+            const data = await res.json();
+            isSuperAdminUser = !!data.is_super_admin;
+        }
+    } catch (e) {
+        console.warn("Could not check super admin status:", e);
+    }
+}
+
 function getUserRole() {
     // Local mode always has full access
     if (!tournament.backendUrl) return 'admin';
 
     if (!currentUser) return 'public';
+
+    // Super Admin check: Global admin across all tournaments
+    if (isSuperAdmin()) return 'admin';
 
     const authData = tournament?.data?.auth;
     if (!authData) return 'public';
@@ -143,10 +172,11 @@ function updateAuthUI() {
     }
 }
 
-function handleCredentialResponse(response) {
+async function handleCredentialResponse(response) {
     const token = response.credential;
     localStorage.setItem('googleAuthToken', token);
     currentUser = parseJwt(token);
+    await checkSuperAdminStatus();
     updateAuthUI();
     // Refresh current view to apply role-based access
     initUI();
@@ -155,6 +185,7 @@ function handleCredentialResponse(response) {
 function signOut() {
     localStorage.removeItem('googleAuthToken');
     currentUser = null;
+    isSuperAdminUser = false;
     updateAuthUI();
     initUI();
 }
@@ -316,6 +347,13 @@ setupForm.addEventListener('submit', async (e) => {
         // Clear navigation history and hash for fresh start
         navigationHistory = [];
         window.location.hash = '';
+
+        if (tournament.data && tournament.data.status === 'pending') {
+            showNotification(
+                'Submitted for Approval',
+                `Tournament request for "${tournament.tournamentId}" submitted! It is currently pending approval by the platform Super Admin.`
+            );
+        }
 
         showDashboard();
     }
@@ -591,9 +629,25 @@ function updateDashboard() {
     }
 
     let closedStr = tournament.data.is_closed ? ' <span class="closed-badge" style="background:#ef4444; color:white; padding:0.1rem 0.4rem; border-radius:3px; font-size:0.7rem; vertical-align:middle; text-transform:uppercase; margin-left:0.5rem; font-weight:600;">Closed</span>' : '';
-    tournamentInfo.innerHTML = `${tournamentName} — ${num_teams} teams • ${roundsText} • Current: Round ${current_round}${adminStr}${closedStr}`;
+    let pendingStr = tournament.data.status === 'pending' ? ' <span class="pending-badge" style="background:#f59e0b; color:white; padding:0.1rem 0.4rem; border-radius:3px; font-size:0.7rem; vertical-align:middle; text-transform:uppercase; margin-left:0.5rem; font-weight:600;">Pending Approval</span>' : '';
+    tournamentInfo.innerHTML = `${tournamentName} — ${num_teams} teams • ${roundsText} • Current: Round ${current_round}${adminStr}${closedStr}${pendingStr}`;
     // Render tabs
     renderTabs();
+
+    if (tournament.data.status === 'pending') {
+        const canApprove = isSuperAdmin();
+        const banner = document.createElement('div');
+        banner.className = 'pending-approval-banner card';
+        banner.style.cssText = 'background: #fffbeb; border: 1px solid #f59e0b; color: #92400e; padding: 0.75rem 1rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;';
+        banner.innerHTML = `
+            <div>
+                <strong>⏳ Tournament Pending Super Admin Approval</strong>
+                <p style="margin: 0.25rem 0 0 0; font-size: 0.9em;">This tournament request must be approved by a platform Super Admin before rounds can be paired.</p>
+            </div>
+            ${canApprove ? `<button class="btn btn-primary" onclick="handleApproveTournament('${tournament.tournamentId}').then(() => updateDashboard())">Approve Tournament</button>` : ''}
+        `;
+        tabContent.prepend(banner);
+    }
 
     // Toggle header buttons based on role
     const role = getUserRole();
@@ -2210,8 +2264,51 @@ function renderHubGrid(tournaments) {
         return idA.localeCompare(idB);
     });
 
-    const active = tournaments.filter(t => !t.is_closed);
-    const closed = tournaments.filter(t => t.is_closed);
+    const pending = tournaments.filter(t => t.status === 'pending');
+    const active = tournaments.filter(t => !t.is_closed && t.status !== 'pending');
+    const closed = tournaments.filter(t => t.is_closed && t.status !== 'pending');
+
+    const renderPendingSection = (list) => {
+        if (list.length === 0) return '';
+        const canApprove = isSuperAdmin();
+        return `
+            <div class="hub-category">
+                <h2 style="margin: 2rem 0 1rem 0; padding-bottom: 0.5rem; border-bottom: 2px solid #f59e0b; display: flex; justify-content: space-between; align-items: center; color: #b45309;">
+                    ⏳ Pending Approval Requests
+                    <span style="font-size: 0.8rem; background: #fef3c7; color: #b45309; padding: 0.2rem 0.6rem; border-radius: 20px;">${list.length}</span>
+                </h2>
+                <div class="tournament-grid">
+                    ${list.map(t => {
+            const tId = t.id;
+            const reqDisplay = t.requested_by ? `<div class="text-muted" style="font-size: 0.85em; margin-top: 0.25rem;">👤 Requested by: ${t.requested_by}</div>` : '';
+            const activeStyle = (tId === tournament.tournamentId && tournament.data)
+                ? 'border-color: #f59e0b; background: rgba(245, 158, 11, 0.08);'
+                : 'border-color: #f59e0b; background: #fffdf5;';
+
+            return `
+                            <div class="tournament-card" style="${activeStyle}" onclick="handleManageTournament('${tId}')">
+                                <div class="tournament-id" style="color: #b45309;">${tId}</div>
+                                <h3>${tId.replace(/-/g, ' ').toUpperCase()}</h3>
+                                ${reqDisplay}
+                                <div style="margin-top: 0.5rem;">
+                                    <span style="background:#f59e0b; color:white; padding:0.15rem 0.45rem; border-radius:3px; font-size:0.7rem; font-weight:600;">PENDING APPROVAL</span>
+                                </div>
+                                <div class="tournament-meta" style="margin-top: 1rem; display: flex; gap: 0.5rem; justify-content: space-between; align-items: center;">
+                                    <span>Review Details →</span>
+                                    ${canApprove ? `
+                                        <div style="display: flex; gap: 0.35rem;" onclick="event.stopPropagation();">
+                                            <button class="btn btn-sm btn-primary" onclick="handleApproveTournament('${tId}')">Approve</button>
+                                            <button class="btn btn-sm btn-danger" onclick="handleRejectTournament('${tId}')">Reject</button>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `;
+        }).join('')}
+                </div>
+            </div>
+        `;
+    };
 
     const renderSection = (title, list, isOpen = true) => {
         if (list.length === 0) return '';
@@ -2252,10 +2349,50 @@ function renderHubGrid(tournaments) {
     };
 
     tournamentHubGrid.innerHTML = `
+        ${renderPendingSection(pending)}
         ${renderSection('Active Tournaments', active)}
         ${renderSection('Closed Archive', closed)}
     `;
 }
+
+window.handleApproveTournament = async (tId) => {
+    showLoading(`Approving tournament ${tId}...`);
+    try {
+        await tournament.approveTournament(tId);
+        showNotification('Success', `Tournament "${tId}" has been approved!`);
+        await fetchTournaments();
+        if (tournament.tournamentId === tId && tournament.data) {
+            tournament.data.status = 'approved';
+            updateDashboard();
+        }
+    } catch (e) {
+        showNotification('Error', e.message);
+    } finally {
+        hideLoading();
+    }
+};
+
+window.handleRejectTournament = (tId) => {
+    showConfirm(
+        'Reject Tournament Request',
+        `Are you sure you want to reject and remove tournament request "${tId}"?`,
+        async () => {
+            showLoading(`Rejecting tournament ${tId}...`);
+            try {
+                await tournament.rejectTournament(tId);
+                showNotification('Success', `Tournament "${tId}" request rejected.`);
+                await fetchTournaments();
+                if (tournament.tournamentId === tId) {
+                    showHub();
+                }
+            } catch (e) {
+                showNotification('Error', e.message);
+            } finally {
+                hideLoading();
+            }
+        }
+    );
+};
 
 window.handleManageTournament = async (tId) => {
     showLoading(`Loading ${tId}...`);

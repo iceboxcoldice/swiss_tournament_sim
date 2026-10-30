@@ -37,6 +37,17 @@ GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID')
 DEFAULT_TOURNAMENT_ID = 'default'
 LOCAL_STORAGE_DIR = 'local_storage'
 
+# Super Admin Configuration
+SUPER_ADMIN_EMAILS = [
+    e.strip().lower() for e in os.environ.get('SUPER_ADMIN_EMAILS', 'coldice@gmail.com').split(',') if e.strip()
+]
+
+def is_super_admin(email):
+    """Check if an email has global Super Admin privileges."""
+    if not email:
+        return False
+    return email.lower().strip() in SUPER_ADMIN_EMAILS
+
 if not BUCKET_NAME:
     logger.info("GCS_BUCKET_NAME not set. Using local filesystem storage.")
     if not os.path.exists(LOCAL_STORAGE_DIR):
@@ -328,6 +339,16 @@ def require_auth(allowed_roles=None):
                 if not data:
                     return jsonify({"error": "Not Found: Tournament does not exist"}), 404
                 
+                # Super Admin bypass: Global administrative access across all tournaments
+                if is_super_admin(user_email):
+                    request.user_info = user_info
+                    return f(*args, **kwargs)
+
+                # Pending tournament check:
+                # Disallow modifying, pairing, reporting, or registering teams for unapproved tournaments
+                if data.get('status') == 'pending' and request.endpoint in ['pair_round', 'report_result', 'register_team_endpoint', 'add_judge_endpoint', 'assign_judge', 'add_coach_endpoint']:
+                    return jsonify({"error": "Forbidden: Tournament is pending approval by Super Admin"}), 403
+
                 auth_data = data.get('auth', {})
                 admin_emails = [e.lower() for e in auth_data.get('admins', [])]
                 judge_emails = [e.lower() for e in auth_data.get('judges', {}).values()]
@@ -410,11 +431,21 @@ def list_tournaments():
             data, _ = patched_load_tournament_with_id(t_id)
             admins = []
             is_closed = False
+            status = 'approved'
+            requested_by = None
             if data:
                 is_closed = data.get('is_closed', False)
+                status = data.get('status', 'approved')
+                requested_by = data.get('requested_by')
                 if 'auth' in data and 'admins' in data['auth']:
                     admins = data['auth']['admins']
-            tournaments_data.append({"id": t_id, "admins": admins, "is_closed": is_closed})
+            tournaments_data.append({
+                "id": t_id,
+                "admins": admins,
+                "is_closed": is_closed,
+                "status": status,
+                "requested_by": requested_by
+            })
             
         return jsonify({"tournaments": tournaments_data}), 200
     except Exception as e:
@@ -452,6 +483,14 @@ def init_tournament(tournament_id):
             t_obj.institution = institution
             teams.append(t_obj)
             
+        user_info = getattr(request, 'user_info', None)
+        logger.info(f"init_tournament: user_info identified as: {user_info}")
+        user_email = user_info.get('email', '').lower() if user_info else ''
+        
+        # Super admin or offline local dev mode auto-approves. Regular users require Super Admin approval.
+        auto_approve = not GOOGLE_OAUTH_CLIENT_ID or is_super_admin(user_email)
+        status = 'approved' if auto_approve else 'pending'
+
         data = {
             "config": {
                 "num_teams": num_teams,
@@ -459,6 +498,11 @@ def init_tournament(tournament_id):
                 "num_elim_rounds": elim_rounds,
                 "num_rounds": rounds + elim_rounds,
             },
+            "status": status,
+            "requested_by": user_email if user_email else None,
+            "requested_at": datetime.utcnow().isoformat(),
+            "approved_by": user_email if auto_approve and user_email else None,
+            "approved_at": datetime.utcnow().isoformat() if auto_approve else None,
             "current_round": 0,
             "rounds": [],
             "teams": [asdict(t) for t in teams],
@@ -466,23 +510,16 @@ def init_tournament(tournament_id):
             "next_match_id": 1,
             "tournament_id": tournament_id,
             "auth": {
-                "admins": []
+                "admins": [user_email] if user_email else [],
+                "judges": {},
+                "coaches": {}
             }
         }
         
-        # Add creator as admin
-        user_info = getattr(request, 'user_info', None)
-        logger.info(f"init_tournament: user_info identified as: {user_info}")
-        if user_info and user_info.get('email'):
-            admin_email = user_info.get('email').lower()
-            data["auth"]["admins"].append(admin_email)
-            logger.info(f"Added {admin_email} as first admin of {tournament_id}")
-        else:
-            logger.warning(f"Could NOT identify creator for tournament {tournament_id}. Admin list will be EMPTY.")
-        
         if save_tournament_to_gcs(data, tournament_id):
-            logger.info(f"Tournament {tournament_id} initialized successfully")
-            return jsonify({"message": "Tournament initialized", "config": data['config']}), 200
+            logger.info(f"Tournament {tournament_id} initialized with status {status}")
+            msg = "Tournament initialized" if auto_approve else "Tournament creation request submitted and pending super admin approval"
+            return jsonify({"message": msg, "status": status, "config": data['config']}), 200
         else:
             logger.error(f"Failed to save tournament {tournament_id} to GCS during init")
             return jsonify({"error": "Failed to save tournament data"}), 500
@@ -1131,6 +1168,63 @@ def remove_coach_endpoint(tournament_id, coach_email):
             return jsonify({"message": f"Coach {email} removed", "coaches": auth_data['coaches']}), 200
         return jsonify({"error": "Failed to save tournament data"}), 500
     return jsonify({"error": f"Coach {email} not found"}), 404
+
+@app.route('/api/user/super_admin_status', methods=['GET'])
+@require_auth()
+def get_super_admin_status():
+    """Check if current authenticated user is a Super Admin."""
+    user_info = getattr(request, 'user_info', None)
+    email = user_info.get('email', '').lower().strip() if user_info else ''
+    return jsonify({
+        "email": email,
+        "is_super_admin": is_super_admin(email)
+    }), 200
+
+@app.route('/api/t/<tournament_id>/approve', methods=['POST'])
+@require_auth()
+def approve_tournament(tournament_id):
+    """Approve a pending tournament request (Super Admin only)."""
+    user_info = getattr(request, 'user_info', None)
+    email = user_info.get('email', '').lower().strip() if user_info else ''
+    if not is_super_admin(email) and GOOGLE_OAUTH_CLIENT_ID:
+        return jsonify({"error": "Forbidden: Requires Super Admin privileges"}), 403
+
+    data, teams_objs = patched_load_tournament_with_id(tournament_id)
+    if not data:
+        return jsonify({"error": "Tournament not found"}), 404
+
+    data['status'] = 'approved'
+    data['approved_by'] = email if email else 'admin'
+    data['approved_at'] = datetime.utcnow().isoformat()
+
+    if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+        return jsonify({"message": f"Tournament {tournament_id} approved successfully", "status": "approved"}), 200
+    return jsonify({"error": "Failed to save tournament approval"}), 500
+
+@app.route('/api/t/<tournament_id>/reject', methods=['POST'])
+@require_auth()
+def reject_tournament(tournament_id):
+    """Reject and delete a pending tournament request (Super Admin only)."""
+    user_info = getattr(request, 'user_info', None)
+    email = user_info.get('email', '').lower().strip() if user_info else ''
+    if not is_super_admin(email) and GOOGLE_OAUTH_CLIENT_ID:
+        return jsonify({"error": "Forbidden: Requires Super Admin privileges"}), 403
+
+    path = get_blob_path(tournament_id)
+    if BUCKET_NAME:
+        client = get_storage_client()
+        bucket = client.bucket(BUCKET_NAME)
+        blob = bucket.blob(path)
+        if blob.exists():
+            blob.delete()
+    else:
+        if os.path.exists(path):
+            os.remove(path)
+            try:
+                os.rmdir(os.path.dirname(path))
+            except OSError:
+                pass
+    return jsonify({"message": f"Tournament {tournament_id} request rejected and removed"}), 200
 
 
 if __name__ == '__main__':
