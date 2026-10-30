@@ -1757,6 +1757,28 @@ def get_all_events_endpoint():
     }), 200
 
 
+@app.route('/api/t/<tournament_id>/verify_consistency', methods=['GET'])
+@require_auth(allowed_roles=['admin'])
+def verify_tournament_consistency_endpoint(tournament_id):
+    """Run an automated consistency and rule validation check for a tournament."""
+    report = event_replay.verify_storage_consistency(LOCAL_STORAGE_DIR, tournament_id)
+    status_code = 200 if report.get('is_consistent') else 409
+    return jsonify(report), status_code
+
+@app.route('/api/verify_consistency', methods=['GET'])
+@require_auth()
+def verify_platform_consistency_endpoint():
+    """Run an automated consistency and rule validation check across all tournaments (Super Admin only)."""
+    user_info = getattr(request, 'user_info', None)
+    email = user_info.get('email', '').lower().strip() if user_info else ''
+    if not is_super_admin(email) and GOOGLE_OAUTH_CLIENT_ID:
+        return jsonify({"error": "Forbidden: Requires Super Admin privileges"}), 403
+
+    report = event_replay.verify_storage_consistency(LOCAL_STORAGE_DIR)
+    status_code = 200 if report.get('is_consistent') else 409
+    return jsonify(report), status_code
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8081))
     app.run(host='0.0.0.0', port=port, debug=True)

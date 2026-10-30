@@ -481,78 +481,333 @@ class ReplayEngine:
         for event in events:
             self.apply_event(event)
 
+def validate_event_rules(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Audit event stream for rule violations, sequence anomalies, and out-of-order events.
+    Returns a list of violation dictionaries: [{"rule": ..., "message": ..., "event": ...}]
+    """
+    violations = []
+    t_states = {}
+    last_timestamp = None
+
+    for idx, e in enumerate(events):
+        ts = e.get("timestamp")
+        action = e.get("action")
+        tid = e.get("tournament_id")
+        p = e.get("payload", {})
+        actor = e.get("actor", "system")
+
+        # 1. Monotonic Timestamp Check
+        if ts:
+            if last_timestamp and ts < last_timestamp:
+                violations.append({
+                    "rule": "MONOTONIC_TIMESTAMPS",
+                    "message": f"Event #{idx} ({action}) timestamp {ts} is out-of-order relative to previous {last_timestamp}",
+                    "event_index": idx,
+                    "event": e
+                })
+            last_timestamp = ts
+
+        # For global actions (PARADIGM_UPDATED, EMAIL_LINKED)
+        if not tid:
+            continue
+
+        if tid not in t_states:
+            t_states[tid] = {
+                "initialized": False,
+                "status": "pending",
+                "closed": False,
+                "current_round": 0,
+                "matches": set(),
+                "judges": set(),
+                "coach_requests": set(),
+                "coaches": set(),
+                "team_requests": set(),
+                "teams": set()
+            }
+
+        st = t_states[tid]
+
+        # 2. Lifecycle: Initialization Check
+        if action == "TOURNAMENT_INIT":
+            st["initialized"] = True
+            st["status"] = p.get("status", "approved")
+            st["closed"] = False
+            for j in p.get("judges", []):
+                if j.get("id"):
+                    st["judges"].add(j["id"])
+            for t in p.get("teams", []):
+                if t.get("id") is not None:
+                    st["teams"].add(t["id"])
+            continue
+
+        if not st["initialized"]:
+            violations.append({
+                "rule": "UNINITIALIZED_TOURNAMENT",
+                "message": f"Event #{idx} ({action}) occurred on '{tid}' before TOURNAMENT_INIT",
+                "event_index": idx,
+                "event": e
+            })
+            continue
+
+        # 3. Actions on closed tournament
+        if st["closed"] and action != "TOURNAMENT_RESET":
+            violations.append({
+                "rule": "MUTATION_AFTER_CLOSE",
+                "message": f"Event #{idx} ({action}) occurred after tournament '{tid}' was closed",
+                "event_index": idx,
+                "event": e
+            })
+
+        # 4. Status Checks (Pending tournaments cannot pair rounds or report ballots)
+        if st["status"] == "pending":
+            if action in ("ROUND_PAIRED", "BALLOT_REPORTED", "JUDGE_ASSIGNED"):
+                violations.append({
+                    "rule": "UNAPPROVED_TOURNAMENT_MUTATION",
+                    "message": f"Event #{idx} ({action}) occurred while tournament '{tid}' is pending Super Admin approval",
+                    "event_index": idx,
+                    "event": e
+                })
+
+        # 5. Entity Reference and Sequence Validations
+        if action == "TOURNAMENT_APPROVED":
+            st["status"] = "approved"
+
+        elif action in ("TOURNAMENT_REJECTED", "TOURNAMENT_RESET"):
+            st["initialized"] = False
+            st["closed"] = True
+
+        elif action == "TOURNAMENT_CLOSED":
+            st["closed"] = True
+
+        elif action == "COACH_REQUESTED":
+            email = p.get("email", actor).lower()
+            st["coach_requests"].add(email)
+
+        elif action == "COACH_APPROVED":
+            email = p.get("email", "").lower()
+            st["coaches"].add(email)
+            st["coach_requests"].discard(email)
+
+        elif action == "COACH_REJECTED":
+            email = p.get("email", "").lower()
+            st["coach_requests"].discard(email)
+
+        elif action == "COACH_ADDED":
+            email = p.get("email", "").lower()
+            st["coaches"].add(email)
+
+        elif action == "COACH_REMOVED":
+            email = p.get("email", "").lower()
+            st["coaches"].discard(email)
+
+        elif action == "TEAM_REQUESTED":
+            req_id = p.get("id")
+            if req_id:
+                st["team_requests"].add(req_id)
+
+        elif action == "TEAM_APPROVED":
+            req_id = p.get("request_id")
+            if req_id and req_id not in st["team_requests"]:
+                violations.append({
+                    "rule": "UNKNOWN_TEAM_REQUEST",
+                    "message": f"Event #{idx} approved non-existent team request '{req_id}'",
+                    "event_index": idx,
+                    "event": e
+                })
+            st["team_requests"].discard(req_id)
+            new_team = p.get("team")
+            if new_team and new_team.get("id") is not None:
+                st["teams"].add(new_team["id"])
+
+        elif action == "TEAM_REJECTED":
+            req_id = p.get("request_id")
+            st["team_requests"].discard(req_id)
+
+        elif action == "TEAM_REGISTERED":
+            team_data = p.get("team", p)
+            if team_data and team_data.get("id") is not None:
+                st["teams"].add(team_data["id"])
+
+        elif action == "JUDGE_ADDED":
+            judge = p.get("judge", p)
+            if judge and judge.get("id"):
+                st["judges"].add(judge["id"])
+
+        elif action == "JUDGE_REMOVED":
+            jid = p.get("judge_id")
+            st["judges"].discard(jid)
+
+        elif action == "JUDGE_ASSIGNED":
+            mid = p.get("match_id")
+            jid = p.get("judge_id")
+            if mid and mid not in st["matches"]:
+                violations.append({
+                    "rule": "UNKNOWN_MATCH_ASSIGNMENT",
+                    "message": f"Event #{idx} assigned judge to non-existent match {mid}",
+                    "event_index": idx,
+                    "event": e
+                })
+            if jid and jid != -1 and jid not in st["judges"]:
+                violations.append({
+                    "rule": "UNKNOWN_JUDGE_ASSIGNMENT",
+                    "message": f"Event #{idx} assigned non-existent judge {jid} to match {mid}",
+                    "event_index": idx,
+                    "event": e
+                })
+
+        elif action == "ROUND_PAIRED":
+            round_num = p.get("round_num", st["current_round"] + 1)
+            expected_round = st["current_round"] + 1
+            if round_num != expected_round:
+                violations.append({
+                    "rule": "NON_SEQUENTIAL_ROUND",
+                    "message": f"Event #{idx} paired round {round_num}, expected round {expected_round}",
+                    "event_index": idx,
+                    "event": e
+                })
+            st["current_round"] = round_num
+            for m in p.get("matches", []):
+                mid = m.get("match_id")
+                if mid:
+                    st["matches"].add(mid)
+
+        elif action == "BALLOT_REPORTED":
+            mid = p.get("match_id")
+            if mid and mid not in st["matches"]:
+                violations.append({
+                    "rule": "UNKNOWN_BALLOT_MATCH",
+                    "message": f"Event #{idx} reported ballot for non-existent match {mid}",
+                    "event_index": idx,
+                    "event": e
+                })
+
+    return violations
+
+def verify_storage_consistency(storage_dir: str, tournament_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Deterministically replay event logs to a sandbox and compare with live storage state.
+    Also validates causal event ordering and sequence rules.
+    """
+    log_path = get_event_log_path(storage_dir, tournament_id)
+    events = load_events(log_path)
+    
+    rule_violations = validate_event_rules(events)
+    
+    import tempfile
+    import shutil
+    temp_dir = tempfile.mkdtemp(prefix="replay_verify_")
+    state_diffs = []
+    tournaments_checked = []
+
+    try:
+        engine = ReplayEngine(temp_dir)
+        engine.replay_all(events)
+        
+        # Check tournaments
+        if tournament_id:
+            t_dirs = [tournament_id] if os.path.exists(os.path.join(storage_dir, tournament_id, "tournament.json")) else []
+        else:
+            t_dirs = [
+                d for d in os.listdir(storage_dir) 
+                if os.path.isdir(os.path.join(storage_dir, d)) and os.path.exists(os.path.join(storage_dir, d, "tournament.json"))
+            ]
+        
+        for tid in t_dirs:
+            tournaments_checked.append(tid)
+            orig_t_file = os.path.join(storage_dir, tid, "tournament.json")
+            rep_t_file = os.path.join(temp_dir, tid, "tournament.json")
+            
+            if not os.path.exists(rep_t_file):
+                state_diffs.append({
+                    "tournament_id": tid,
+                    "type": "MISSING_FROM_REPLAY",
+                    "message": f"Tournament {tid} exists in live storage but not created by replay."
+                })
+                continue
+                
+            with open(orig_t_file, "r") as f1, open(rep_t_file, "r") as f2:
+                d1 = json.load(f1)
+                d2 = json.load(f2)
+                
+            if d1 != d2:
+                diff_keys = [k for k in set(d1.keys()).union(d2.keys()) if d1.get(k) != d2.get(k)]
+                state_diffs.append({
+                    "tournament_id": tid,
+                    "type": "STATE_MISMATCH",
+                    "message": f"Tournament {tid} differs between live and replay on keys: {diff_keys}",
+                    "differing_keys": diff_keys
+                })
+
+        # Check aliases
+        orig_aliases = os.path.join(storage_dir, "profiles", "aliases.json")
+        if not os.path.exists(orig_aliases):
+            orig_aliases = os.path.join(storage_dir, "aliases.json")
+        if os.path.exists(orig_aliases):
+            with open(orig_aliases) as f:
+                a1 = json.load(f)
+            rep_aliases = os.path.join(temp_dir, "profiles", "aliases.json")
+            if not os.path.exists(rep_aliases):
+                rep_aliases = os.path.join(temp_dir, "aliases.json")
+            a2 = {}
+            if os.path.exists(rep_aliases):
+                with open(rep_aliases) as f:
+                    a2 = json.load(f)
+            if a1 != a2:
+                state_diffs.append({
+                    "type": "ALIASES_MISMATCH",
+                    "message": "Email aliases table differs between live storage and event replay."
+                })
+
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    is_consistent = (len(rule_violations) == 0 and len(state_diffs) == 0)
+    return {
+        "status": "consistent" if is_consistent else "inconsistent",
+        "is_consistent": is_consistent,
+        "event_count": len(events),
+        "rule_violations": rule_violations,
+        "state_diffs": state_diffs,
+        "tournaments_checked": tournaments_checked
+    }
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Central Event Journal & State Replay CLI")
     parser.add_argument("--replay", type=str, help="Path to events.jsonl to replay")
     parser.add_argument("--target", type=str, default="replay_output", help="Target directory for replayed state")
-    parser.add_argument("--tournament", type=str, help="Optional: Replay events for specific tournament only")
-    parser.add_argument("--verify", action="store_true", help="Verify replay state matches current storage directory")
+    parser.add_argument("--tournament", type=str, help="Optional: Tournament ID to filter or verify")
+    parser.add_argument("--verify", action="store_true", help="Verify replay state and rule integrity against current storage directory")
     parser.add_argument("--storage", type=str, default="local_storage", help="Current storage directory (for verify)")
     args = parser.parse_args()
 
     if args.verify:
-        log_path = get_event_log_path(args.storage)
-        if not os.path.exists(log_path):
-            print(f"No central event log found at {log_path}")
-            sys.exit(1)
-        events = load_events(log_path)
-        print(f"Loaded {len(events)} events from {log_path}")
+        print(f"Running state and rule consistency check against {args.storage}...")
+        report = verify_storage_consistency(args.storage, args.tournament)
+        print(f"Event Count: {report['event_count']}")
+        print(f"Tournaments Checked: {report['tournaments_checked']}")
         
-        import tempfile
-        import shutil
-        temp_dir = tempfile.mkdtemp(prefix="replay_verify_")
-        try:
-            engine = ReplayEngine(temp_dir)
-            engine.replay_all(events)
-            print(f"Replayed {len(events)} events to temporary directory {temp_dir}")
-            
-            mismatches = 0
-            for item in os.listdir(args.storage):
-                orig_t_file = os.path.join(args.storage, item, "tournament.json")
-                if os.path.isfile(orig_t_file):
-                    rep_t_file = os.path.join(temp_dir, item, "tournament.json")
-                    if not os.path.exists(rep_t_file):
-                        print(f"MISMATCH: Tournament {item} missing from replay!")
-                        mismatches += 1
-                        continue
-                    with open(orig_t_file, "r") as f1, open(rep_t_file, "r") as f2:
-                        d1 = json.load(f1)
-                        d2 = json.load(f2)
-                    if d1 == d2:
-                        print(f"MATCH: Tournament {item} state perfectly reconstructed.")
-                    else:
-                        print(f"DIFF: Tournament {item} has differences between live and replay.")
-                        mismatches += 1
+        if report['rule_violations']:
+            print(f"\n[RULE VIOLATIONS FOUND] ({len(report['rule_violations'])}):")
+            for v in report['rule_violations']:
+                print(f"  - [{v['rule']}] {v['message']}")
+        else:
+            print("\n[OK] No rule or ordering violations detected.")
 
-            # Verify aliases if present
-            orig_aliases = os.path.join(args.storage, "profiles", "aliases.json")
-            if not os.path.exists(orig_aliases):
-                orig_aliases = os.path.join(args.storage, "aliases.json")
-            if os.path.exists(orig_aliases):
-                with open(orig_aliases) as f:
-                    a1 = json.load(f)
-                rep_aliases = os.path.join(temp_dir, "profiles", "aliases.json")
-                if not os.path.exists(rep_aliases):
-                    rep_aliases = os.path.join(temp_dir, "aliases.json")
-                a2 = {}
-                if os.path.exists(rep_aliases):
-                    with open(rep_aliases) as f:
-                        a2 = json.load(f)
-                if a1 == a2:
-                    print("MATCH: Email aliases perfectly reconstructed.")
-                else:
-                    print("DIFF: Email aliases difference detected.")
-                    mismatches += 1
+        if report['state_diffs']:
+            print(f"\n[STATE MISMATCHES DETECTED] ({len(report['state_diffs'])}):")
+            for d in report['state_diffs']:
+                print(f"  - [{d.get('type')}] {d.get('message')}")
+        else:
+            print("[OK] Deterministic state replay matches live storage bit-for-bit.")
 
-            if mismatches == 0:
-                print("SUCCESS: 100% Deterministic State Replay Verified!")
-                sys.exit(0)
-            else:
-                print(f"FAILURE: {mismatches} mismatches detected.")
-                sys.exit(1)
-        finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
+        if report['is_consistent']:
+            print("\nSUCCESS: 100% Deterministic State Replay & Rule Invariants Verified!")
+            sys.exit(0)
+        else:
+            print("\nFAILURE: Consistency anomalies detected.")
+            sys.exit(1)
 
     elif args.replay:
         if not os.path.exists(args.replay):

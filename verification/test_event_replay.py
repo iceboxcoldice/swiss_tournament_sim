@@ -343,7 +343,50 @@ class TestEventReplay(unittest.TestCase):
         ]
         result_verify = subprocess.run(cmd_verify, capture_output=True, text=True)
         self.assertEqual(result_verify.returncode, 0, f"CLI verify failed: {result_verify.stdout}\n{result_verify.stderr}")
-        self.assertIn("100% Deterministic State Replay Verified!", result_verify.stdout)
+        self.assertIn("100% Deterministic State Replay & Rule Invariants Verified!", result_verify.stdout)
+
+        # 4. Test consistency verification API endpoints
+        res_t = self.app.get('/api/t/cli-tournament/verify_consistency', headers={'X-User-Email': 'coldice@gmail.com'})
+        self.assertEqual(res_t.status_code, 200)
+        self.assertTrue(res_t.get_json()['is_consistent'])
+
+        res_p = self.app.get('/api/verify_consistency', headers={'X-User-Email': 'coldice@gmail.com'})
+        self.assertEqual(res_p.status_code, 200)
+        self.assertTrue(res_p.get_json()['is_consistent'])
+
+    def test_rule_validation_anomalies(self):
+        """Test that validate_event_rules detects out-of-order and anomalous events."""
+        # 1. Monotonic timestamp violation
+        events_timestamp = [
+            {"action": "TOURNAMENT_INIT", "tournament_id": "t1", "timestamp": "2026-10-30T10:00:00Z", "payload": {}},
+            {"action": "COACH_REQUESTED", "tournament_id": "t1", "timestamp": "2026-10-30T09:00:00Z", "payload": {"email": "c@s.edu"}}
+        ]
+        violations = event_replay.validate_event_rules(events_timestamp)
+        self.assertTrue(any(v['rule'] == 'MONOTONIC_TIMESTAMPS' for v in violations))
+
+        # 2. Mutation before initialization
+        events_uninit = [
+            {"action": "ROUND_PAIRED", "tournament_id": "uninit_t", "timestamp": "2026-10-30T10:00:00Z", "payload": {"round_num": 1}}
+        ]
+        violations = event_replay.validate_event_rules(events_uninit)
+        self.assertTrue(any(v['rule'] == 'UNINITIALIZED_TOURNAMENT' for v in violations))
+
+        # 3. Mutation after close
+        events_closed = [
+            {"action": "TOURNAMENT_INIT", "tournament_id": "t2", "timestamp": "2026-10-30T10:00:00Z", "payload": {}},
+            {"action": "TOURNAMENT_CLOSED", "tournament_id": "t2", "timestamp": "2026-10-30T11:00:00Z", "payload": {}},
+            {"action": "ROUND_PAIRED", "tournament_id": "t2", "timestamp": "2026-10-30T12:00:00Z", "payload": {"round_num": 1}}
+        ]
+        violations = event_replay.validate_event_rules(events_closed)
+        self.assertTrue(any(v['rule'] == 'MUTATION_AFTER_CLOSE' for v in violations))
+
+        # 4. Unknown ballot match reference
+        events_bad_ballot = [
+            {"action": "TOURNAMENT_INIT", "tournament_id": "t3", "timestamp": "2026-10-30T10:00:00Z", "payload": {}},
+            {"action": "BALLOT_REPORTED", "tournament_id": "t3", "timestamp": "2026-10-30T11:00:00Z", "payload": {"match_id": 9999, "result": "A"}}
+        ]
+        violations = event_replay.validate_event_rules(events_bad_ballot)
+        self.assertTrue(any(v['rule'] == 'UNKNOWN_BALLOT_MATCH' for v in violations))
 
 if __name__ == '__main__':
     unittest.main()
