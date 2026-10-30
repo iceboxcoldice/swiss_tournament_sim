@@ -734,14 +734,12 @@ function renderTabs() {
     judgesBtn.onclick = showJudges;
     mainTabs.appendChild(judgesBtn);
 
-    // Create Coaches tab (Admin only)
-    if (role === 'admin') {
-        const coachesBtn = document.createElement('button');
-        coachesBtn.className = 'tab-btn';
-        coachesBtn.textContent = 'Coaches';
-        coachesBtn.onclick = showCoaches;
-        mainTabs.appendChild(coachesBtn);
-    }
+    // Create Coaches tab
+    const coachesBtn = document.createElement('button');
+    coachesBtn.className = 'tab-btn';
+    coachesBtn.textContent = 'Coaches';
+    coachesBtn.onclick = showCoaches;
+    mainTabs.appendChild(coachesBtn);
 
     // Create round tabs
     const { num_prelim_rounds, num_elim_rounds } = tournament.data.config;
@@ -1563,26 +1561,56 @@ async function showCoaches() {
     });
 
     const role = getUserRole();
-    if (role !== 'admin') {
-        tabContent.innerHTML = '<div class="card"><p class="text-muted">Coach management is restricted to tournament administrators.</p></div>';
-        return;
-    }
+    const isAdmin = role === 'admin';
+    const isCoach = role === 'coach';
 
     let coaches = {};
     let coachRequests = {};
     try {
         coaches = await tournament.fetchCoaches();
-        coachRequests = await tournament.fetchCoachRequests();
+        if (isAdmin) {
+            coachRequests = await tournament.fetchCoachRequests();
+        }
     } catch (e) {
         coaches = (tournament.data && tournament.data.auth && tournament.data.auth.coaches) || {};
-        coachRequests = (tournament.data && tournament.data.auth && tournament.data.auth.coach_requests) || {};
+        if (isAdmin) {
+            coachRequests = (tournament.data && tournament.data.auth && tournament.data.auth.coach_requests) || {};
+        }
     }
 
     const coachEmails = Object.keys(coaches || {}).sort();
     const requestEmails = Object.keys(coachRequests || {}).sort();
 
+    const myReq = (currentUser && tournament.data && tournament.data.auth && tournament.data.auth.coach_requests)
+        ? tournament.data.auth.coach_requests[currentUser.email.toLowerCase()]
+        : null;
+
     tabContent.innerHTML = `
-        ${requestEmails.length > 0 ? `
+        ${!isAdmin && myReq ? `
+        <div class="card" style="border: 1px solid #f59e0b; background: #fffdf5; margin-bottom: 1.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <span style="font-size: 1.5rem;">⏳</span>
+                <div>
+                    <h4 style="margin: 0 0 0.25rem 0; color: #b45309;">Coach Access Request Pending</h4>
+                    <p class="text-muted" style="margin: 0; font-size: 0.9em;">
+                        Your coaching request for <strong>${myReq.institution}</strong> is awaiting approval by the tournament administrator. Once approved, you can register and manage your school's teams.
+                    </p>
+                </div>
+            </div>
+        </div>
+        ` : ''}
+
+        ${!isAdmin && !isCoach && !myReq && !tournament.data.is_closed ? `
+        <div class="card" style="border: 1px dashed var(--primary); background: rgba(79, 70, 229, 0.04); margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+            <div>
+                <h4 style="margin: 0 0 0.25rem 0; color: var(--primary);">Are you a school coach?</h4>
+                <p class="text-muted" style="margin: 0; font-size: 0.9em;">Request coaching access to register your school's teams and approve student entries.</p>
+            </div>
+            <button class="btn btn-primary" onclick="promptCoachRequest()">Request Coach Access</button>
+        </div>
+        ` : ''}
+
+        ${isAdmin && requestEmails.length > 0 ? `
         <div class="card" style="border: 1px solid #f59e0b; background: #fffdf5; margin-bottom: 1.5rem;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                 <h3 style="color: #b45309; margin: 0;">⏳ Pending Coach Requests</h3>
@@ -1626,13 +1654,13 @@ async function showCoaches() {
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                 <h3>School Coaches</h3>
-                ${!tournament.data.is_closed ? '<button class="btn btn-primary" onclick="showAddCoachForm()">+ Add Coach</button>' : ''}
+                ${isAdmin && !tournament.data.is_closed ? '<button class="btn btn-primary" onclick="showAddCoachForm()">+ Add Coach</button>' : ''}
             </div>
             <p class="text-muted">Total Coaches: ${coachEmails.length}</p>
             
             ${coachEmails.length === 0 ? `
                 <p class="text-muted" style="text-align: center; padding: 2rem;">
-                    No coaches registered yet. Click "Add Coach" to grant school coaches permission to register and edit their school's teams.
+                    No coaches registered yet.${isAdmin ? ' Click "Add Coach" to grant school coaches permission to register and edit their school\'s teams.' : ''}
                 </p>
             ` : `
                 <table class="standings-table">
@@ -1640,7 +1668,7 @@ async function showCoaches() {
                         <tr>
                             <th>Email</th>
                             <th>Institution</th>
-                            <th>Actions</th>
+                            ${isAdmin ? '<th>Actions</th>' : ''}
                         </tr>
                     </thead>
                     <tbody>
@@ -1651,7 +1679,8 @@ async function showCoaches() {
                                         <strong style="font-family: monospace;">${email}</strong>
                                     </a>
                                 </td>
-                                <td>${coaches[email] || '—'}</td>
+                                <td><span style="font-weight: 600; color: var(--primary);">${coaches[email] || '—'}</span></td>
+                                ${isAdmin ? `
                                 <td>
                                     <button 
                                         class="btn btn-sm btn-danger" 
@@ -1660,6 +1689,7 @@ async function showCoaches() {
                                         Delete
                                     </button>
                                 </td>
+                                ` : ''}
                             </tr>
                         `).join('')}
                     </tbody>
