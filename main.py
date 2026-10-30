@@ -42,11 +42,110 @@ SUPER_ADMIN_EMAILS = [
     e.strip().lower() for e in os.environ.get('SUPER_ADMIN_EMAILS', 'coldice@gmail.com').split(',') if e.strip()
 ]
 
+# Testing Mode & User Registration Approval Configuration
+TESTING_MODE = os.environ.get('TESTING_MODE', 'false').lower() in ('true', '1', 'yes')
+REQUIRE_USER_APPROVAL = os.environ.get('REQUIRE_USER_APPROVAL', 'false').lower() in ('true', '1', 'yes')
+USER_REGISTRY_FILE = "users/registry.json"
+
 def is_super_admin(email):
     """Check if an email has global Super Admin privileges."""
     if not email:
         return False
     return email.lower().strip() in SUPER_ADMIN_EMAILS
+
+def get_user_registry_path():
+    if BUCKET_NAME:
+        return USER_REGISTRY_FILE
+    user_dir = os.path.join(LOCAL_STORAGE_DIR, 'users')
+    os.makedirs(user_dir, exist_ok=True)
+    return os.path.join(user_dir, 'registry.json')
+
+def load_user_registry():
+    """Load the user registry containing registration and approval statuses."""
+    try:
+        path = get_user_registry_path()
+        if BUCKET_NAME:
+            client = get_storage_client()
+            bucket = client.bucket(BUCKET_NAME)
+            blob = bucket.blob(path)
+            if not blob.exists():
+                return {}
+            data_str = blob.download_as_text()
+            return json.loads(data_str)
+        else:
+            if not os.path.exists(path):
+                return {}
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception as e:
+        logger.error(f"Error loading user registry: {e}")
+        return {}
+
+def save_user_registry(registry):
+    """Save the user registry."""
+    try:
+        path = get_user_registry_path()
+        data_str = json.dumps(registry, indent=2, sort_keys=True)
+        if BUCKET_NAME:
+            client = get_storage_client()
+            bucket = client.bucket(BUCKET_NAME)
+            blob = bucket.blob(path)
+            blob.upload_from_string(data_str, content_type='application/json')
+            return True
+        else:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(data_str)
+            return True
+    except Exception as e:
+        logger.error(f"Error saving user registry: {e}")
+        return False
+
+def is_user_approved(email):
+    """Check if a user is approved to perform actions on the platform."""
+    if not email:
+        return False
+    email_clean = email.lower().strip()
+    # Super admins are always approved
+    if is_super_admin(email_clean):
+        return True
+    # If user approval requirement is disabled, all authenticated users are approved
+    if not REQUIRE_USER_APPROVAL and not TESTING_MODE:
+        return True
+    registry = load_user_registry()
+    user_entry = registry.get(email_clean)
+    if user_entry and user_entry.get('status') == 'approved':
+        return True
+    return False
+
+def get_or_create_user_registration(email, name=""):
+    """Fetch user registration status or record a new pending request."""
+    if not email:
+        return None
+    email_clean = email.lower().strip()
+    registry = load_user_registry()
+    if email_clean in registry:
+        return registry[email_clean]
+
+    is_sa = is_super_admin(email_clean)
+    status = 'approved' if is_sa else 'pending'
+    now_iso = datetime.utcnow().isoformat() + "Z"
+    entry = {
+        "email": email_clean,
+        "name": name or email_clean.split('@')[0],
+        "status": status,
+        "is_super_admin": is_sa,
+        "requested_at": now_iso,
+        "approved_by": "system" if is_sa else None,
+        "approved_at": now_iso if is_sa else None
+    }
+    registry[email_clean] = entry
+    save_user_registry(registry)
+    log_event(
+        action="USER_REGISTRATION_CREATED",
+        payload={"email": email_clean, "status": status, "is_super_admin": is_sa},
+        actor=email_clean
+    )
+    return entry
 
 import event_replay
 
@@ -551,7 +650,19 @@ def init_tournament(tournament_id):
             
         user_info = getattr(request, 'user_info', None)
         logger.info(f"init_tournament: user_info identified as: {user_info}")
-        user_email = user_info.get('email', '').lower() if user_info else ''
+        user_email = user_info.get('email', '').lower().strip() if user_info else ''
+        user_name = user_info.get('name', '') if user_info else ''
+
+        # In testing mode / when user approval is required, check that the user's registration is approved
+        if (REQUIRE_USER_APPROVAL or TESTING_MODE) and GOOGLE_OAUTH_CLIENT_ID and not is_user_approved(user_email):
+            entry = get_or_create_user_registration(user_email, user_name)
+            current_status = entry.get('status', 'pending')
+            if current_status == 'rejected':
+                return jsonify({"error": "Forbidden: Your user registration was rejected by Super Admin."}), 403
+            return jsonify({
+                "error": "Forbidden: User registration requires explicit Super Admin approval during testing mode before creating tournament requests.",
+                "registration_status": current_status
+            }), 403
         
         # Super admin or offline local dev mode auto-approves. Regular users require Super Admin approval.
         auto_approve = not GOOGLE_OAUTH_CLIENT_ID or is_super_admin(user_email)
@@ -2008,6 +2119,183 @@ def verify_platform_consistency_endpoint():
     report = event_replay.verify_storage_consistency(LOCAL_STORAGE_DIR)
     status_code = 200 if report.get('is_consistent') else 409
     return jsonify(report), status_code
+
+
+# ---------------------------------------------------------
+# User Registration & Super Admin Approval Endpoints
+# ---------------------------------------------------------
+
+@app.route('/api/user/status', methods=['GET'])
+@require_auth()
+def get_user_status_endpoint():
+    """Retrieve the current user's registration and approval status."""
+    user_info = getattr(request, 'user_info', None)
+    if not user_info:
+        return jsonify({"status": "unauthenticated"}), 401
+    email = user_info.get('email', '').lower().strip()
+    name = user_info.get('name', '')
+    entry = get_or_create_user_registration(email, name)
+    return jsonify({
+        "email": email,
+        "name": entry.get('name', ''),
+        "status": entry.get('status', 'pending'),
+        "is_super_admin": is_super_admin(email),
+        "is_approved": is_user_approved(email),
+        "testing_mode": TESTING_MODE,
+        "require_user_approval": REQUIRE_USER_APPROVAL
+    }), 200
+
+
+@app.route('/api/user/register', methods=['POST'])
+@require_auth()
+def request_user_registration_endpoint():
+    """Explicitly request platform user registration."""
+    user_info = getattr(request, 'user_info', None)
+    if not user_info:
+        return jsonify({"error": "Unauthorized"}), 401
+    email = user_info.get('email', '').lower().strip()
+    data = request.json or {}
+    name = data.get('name', user_info.get('name', ''))
+    institution = data.get('institution', '')
+    intent = data.get('intent', '')
+
+    registry = load_user_registry()
+    now_iso = datetime.utcnow().isoformat() + "Z"
+    is_sa = is_super_admin(email)
+    status = 'approved' if is_sa else 'pending'
+
+    entry = registry.get(email, {})
+    entry.update({
+        "email": email,
+        "name": name or email.split('@')[0],
+        "institution": institution,
+        "intent": intent,
+        "status": entry.get('status', status) if not is_sa else 'approved',
+        "is_super_admin": is_sa,
+        "requested_at": entry.get('requested_at', now_iso),
+        "approved_by": entry.get('approved_by') if not is_sa else 'system',
+        "approved_at": entry.get('approved_at') if not is_sa else now_iso
+    })
+    registry[email] = entry
+    save_user_registry(registry)
+    log_event(
+        action="USER_REGISTRATION_SUBMITTED",
+        payload={"email": email, "institution": institution, "status": entry['status']},
+        actor=email
+    )
+    return jsonify({
+        "message": "User registration request submitted." if entry['status'] == 'pending' else "User registration active.",
+        "user": entry
+    }), 200
+
+
+@app.route('/api/admin/users', methods=['GET'])
+@require_auth()
+def list_registered_users_endpoint():
+    """List all registered users and their approval statuses (Super Admin only)."""
+    user_info = getattr(request, 'user_info', None)
+    email = user_info.get('email', '').lower().strip() if user_info else ''
+    if not is_super_admin(email) and GOOGLE_OAUTH_CLIENT_ID:
+        return jsonify({"error": "Forbidden: Requires Super Admin privileges"}), 403
+
+    registry = load_user_registry()
+    users_list = list(registry.values())
+    users_list.sort(key=lambda u: u.get('requested_at', ''), reverse=True)
+    return jsonify({
+        "count": len(users_list),
+        "testing_mode": TESTING_MODE,
+        "require_user_approval": REQUIRE_USER_APPROVAL,
+        "users": users_list
+    }), 200
+
+
+@app.route('/api/admin/users/<target_email>/approve', methods=['POST'])
+@require_auth()
+def approve_user_endpoint(target_email):
+    """Approve a user registration (Super Admin only)."""
+    user_info = getattr(request, 'user_info', None)
+    email = user_info.get('email', '').lower().strip() if user_info else ''
+    if not is_super_admin(email) and GOOGLE_OAUTH_CLIENT_ID:
+        return jsonify({"error": "Forbidden: Requires Super Admin privileges"}), 403
+
+    target = target_email.lower().strip()
+    registry = load_user_registry()
+    if target not in registry:
+        registry[target] = {
+            "email": target,
+            "name": target.split('@')[0],
+            "status": "approved",
+            "requested_at": datetime.utcnow().isoformat() + "Z"
+        }
+
+    registry[target]['status'] = 'approved'
+    registry[target]['approved_by'] = email or 'super_admin'
+    registry[target]['approved_at'] = datetime.utcnow().isoformat() + "Z"
+    save_user_registry(registry)
+
+    log_event(
+        action="USER_APPROVED",
+        payload={"approved_user": target, "approved_by": email or "super_admin"},
+        actor=email or 'system'
+    )
+    return jsonify({"message": f"User {target} approved successfully", "user": registry[target]}), 200
+
+
+@app.route('/api/admin/users/<target_email>/reject', methods=['POST'])
+@require_auth()
+def reject_user_endpoint(target_email):
+    """Reject a user registration (Super Admin only)."""
+    user_info = getattr(request, 'user_info', None)
+    email = user_info.get('email', '').lower().strip() if user_info else ''
+    if not is_super_admin(email) and GOOGLE_OAUTH_CLIENT_ID:
+        return jsonify({"error": "Forbidden: Requires Super Admin privileges"}), 403
+
+    target = target_email.lower().strip()
+    if is_super_admin(target):
+        return jsonify({"error": "Cannot reject Super Admin"}), 400
+
+    registry = load_user_registry()
+    if target in registry:
+        registry[target]['status'] = 'rejected'
+        registry[target]['rejected_by'] = email or 'super_admin'
+        registry[target]['rejected_at'] = datetime.utcnow().isoformat() + "Z"
+        save_user_registry(registry)
+
+    log_event(
+        action="USER_REJECTED",
+        payload={"rejected_user": target, "rejected_by": email or "super_admin"},
+        actor=email or 'system'
+    )
+    return jsonify({"message": f"User {target} registration rejected"}), 200
+
+
+@app.route('/api/admin/config', methods=['GET', 'POST'])
+@require_auth()
+def manage_platform_config_endpoint():
+    """View or update platform configuration (Super Admin only)."""
+    global TESTING_MODE, REQUIRE_USER_APPROVAL
+    user_info = getattr(request, 'user_info', None)
+    email = user_info.get('email', '').lower().strip() if user_info else ''
+    if not is_super_admin(email) and GOOGLE_OAUTH_CLIENT_ID:
+        return jsonify({"error": "Forbidden: Requires Super Admin privileges"}), 403
+
+    if request.method == 'POST':
+        data = request.json or {}
+        if 'testing_mode' in data:
+            TESTING_MODE = bool(data['testing_mode'])
+        if 'require_user_approval' in data:
+            REQUIRE_USER_APPROVAL = bool(data['require_user_approval'])
+        log_event(
+            action="PLATFORM_CONFIG_UPDATED",
+            payload={"testing_mode": TESTING_MODE, "require_user_approval": REQUIRE_USER_APPROVAL},
+            actor=email or 'system'
+        )
+
+    return jsonify({
+        "testing_mode": TESTING_MODE,
+        "require_user_approval": REQUIRE_USER_APPROVAL,
+        "super_admin_emails": SUPER_ADMIN_EMAILS
+    }), 200
 
 
 if __name__ == '__main__':

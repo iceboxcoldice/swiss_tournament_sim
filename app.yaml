@@ -1,9 +1,16 @@
 runtime: python311
 entrypoint: gunicorn -b :$PORT main:app
 
+automatic_scaling:
+  min_instances: 0
+  max_instances: 1
+
 env_variables:
   GCS_BUCKET_NAME: "swiss-tournament-data"
   GOOGLE_OAUTH_CLIENT_ID: "1040110950776-lp97tkf0bhc36c8s3v405c46hhf0m53m.apps.googleusercontent.com"
+  TESTING_MODE: "true"
+  REQUIRE_USER_APPROVAL: "true"
+  SUPER_ADMIN_EMAILS: "coldice@gmail.com"
 
 handlers:
   - url: /.*
