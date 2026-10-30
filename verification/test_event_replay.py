@@ -388,5 +388,124 @@ class TestEventReplay(unittest.TestCase):
         violations = event_replay.validate_event_rules(events_bad_ballot)
         self.assertTrue(any(v['rule'] == 'UNKNOWN_BALLOT_MATCH' for v in violations))
 
+    def test_open_registration_and_start_tournament(self):
+        """Test tournament creation with 0 teams, dynamic registration, and closing on start."""
+        tid = 't-open-registration'
+        admin_email = 'admin@debate.org'
+        coach_email = 'coach@mit.edu'
+
+        # 1. Initialize with 0 teams (Open Registration)
+        res = self.app.post(
+            f'/api/t/{tid}/init',
+            data=json.dumps({"rounds": 3, "num_teams": 0}),
+            content_type='application/json',
+            headers={'X-User-Email': 'coldice@gmail.com'}
+        )
+        self.assertEqual(res.status_code, 200)
+        t_data = res.get_json()
+        self.assertEqual(t_data['config']['num_teams'], 0)
+
+        # 2. Add an approved coach
+        res = self.app.post(
+            f'/api/t/{tid}/coaches',
+            data=json.dumps({"email": coach_email, "institution": "MIT"}),
+            content_type='application/json',
+            headers={'X-User-Email': admin_email}
+        )
+        self.assertEqual(res.status_code, 200)
+
+        # 3. Trying to start with 0 teams fails
+        res = self.app.post(
+            f'/api/t/{tid}/start',
+            content_type='application/json',
+            headers={'X-User-Email': admin_email}
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("At least 2 teams", res.get_json()['error'])
+
+        # 4. Coach registers Team 1
+        res = self.app.post(
+            f'/api/t/{tid}/register_team',
+            data=json.dumps({
+                "name": "MIT Alpha",
+                "institution": "MIT",
+                "members": [{"name": "M1", "email": "m1@mit.edu"}, {"name": "M2", "email": "m2@mit.edu"}]
+            }),
+            content_type='application/json',
+            headers={'X-User-Email': coach_email}
+        )
+        self.assertEqual(res.status_code, 200)
+
+        # 5. Student submits team request for Team 2 under MIT coach
+        res = self.app.post(
+            f'/api/t/{tid}/team_requests',
+            data=json.dumps({
+                "name": "MIT Beta",
+                "institution": "MIT",
+                "members": [{"name": "M3", "email": "m3@mit.edu"}, {"name": "M4", "email": "m4@mit.edu"}]
+            }),
+            content_type='application/json',
+            headers={'X-User-Email': 'm3@mit.edu'}
+        )
+        self.assertEqual(res.status_code, 200)
+        req_id = res.get_json()['request_id']
+
+        # 6. Coach approves Team 2
+        res = self.app.post(
+            f'/api/t/{tid}/team_requests/{req_id}/approve',
+            content_type='application/json',
+            headers={'X-User-Email': coach_email}
+        )
+        self.assertEqual(res.status_code, 200)
+
+        # Verify 2 teams registered
+        data = main.load_tournament_from_gcs(tid)
+        self.assertEqual(len(data['teams']), 2)
+        self.assertFalse(data.get('is_started'))
+
+        # 7. Admin starts tournament (locks registration and pairs Round 1)
+        res = self.app.post(
+            f'/api/t/{tid}/start',
+            data=json.dumps({"pair_round_1": True}),
+            content_type='application/json',
+            headers={'X-User-Email': admin_email}
+        )
+        self.assertEqual(res.status_code, 200)
+        start_data = res.get_json()
+        self.assertTrue(start_data['is_started'])
+        self.assertEqual(len(start_data['matches']), 1) # 2 teams = 1 match
+
+        # 8. Verify further team registrations are now REJECTED
+        res_post_start = self.app.post(
+            f'/api/t/{tid}/register_team',
+            data=json.dumps({
+                "name": "MIT Late Entry",
+                "institution": "MIT",
+                "members": []
+            }),
+            content_type='application/json',
+            headers={'X-User-Email': coach_email}
+        )
+        self.assertEqual(res_post_start.status_code, 400)
+        self.assertIn("Registration is closed", res_post_start.get_json()['error'])
+
+        # 9. Verify student team requests are now REJECTED
+        res_req_late = self.app.post(
+            f'/api/t/{tid}/team_requests',
+            data=json.dumps({
+                "name": "MIT Too Late",
+                "institution": "MIT",
+                "members": []
+            }),
+            content_type='application/json',
+            headers={'X-User-Email': 'late@mit.edu'}
+        )
+        self.assertEqual(res_req_late.status_code, 400)
+        self.assertIn("Registration is closed", res_req_late.get_json()['error'])
+
+        # 10. Verify consistency and replay for this tournament
+        report = event_replay.verify_storage_consistency(self.test_dir, tid)
+        self.assertTrue(report['is_consistent'], f"Consistency report failed: {report}")
+
 if __name__ == '__main__':
     unittest.main()

@@ -71,8 +71,11 @@
             <h2>Initialize Tournament</h2>
             <form id="setupForm">
                 <div class="form-group">
-                    <label for="numTeams">Number of Teams:</label>
-                    <input type="number" id="numTeams" min="2" max="300" value="8" required>
+                    <label for="numTeams">Initial Teams (0 for Open Registration):</label>
+                    <input type="number" id="numTeams" min="0" max="300" value="0">
+                    <small style="display: block; margin-top: 4px; color: var(--text-muted); font-size: 0.85rem;">
+                        Leave as 0 for open self-registration (coaches and teams register before the tournament starts).
+                    </small>
                 </div>
                 <div class="form-group">
                     <label for="numRounds">Number of Prelim Rounds:</label>

@@ -521,33 +521,33 @@ def list_tournaments():
 @app.route('/api/t/<tournament_id>/init', methods=['POST'])
 @require_auth()
 def init_tournament(tournament_id):
-    """Initialize a new tournament."""
+    """Initialize a new tournament. Supports 0 teams for open registration."""
     try:
-        req_data = request.json
-        num_teams = req_data.get('num_teams')
+        req_data = request.json or {}
+        num_teams = req_data.get('num_teams', 0)
         rounds = req_data.get('rounds')
         elim_rounds = req_data.get('elim_rounds', 0)
         
-        if not num_teams or not rounds:
-            return jsonify({"error": "Missing num_teams or rounds"}), 400
+        if rounds is None or rounds < 1:
+            return jsonify({"error": "Missing or invalid rounds (must be >= 1)"}), 400
             
         req_teams = req_data.get('teams', [])
         
-        # Create initial data structure
+        # Create initial data structure (can start with 0 teams for open registration)
         teams = []
-        for i in range(num_teams):
-            name = f"Team {i+1}"
-            institution = "Unknown"
-            members = []
-            if i < len(req_teams):
-                req_t = req_teams[i]
-                name = req_t.get('name', name)
-                institution = req_t.get('institution', institution)
+        if req_teams:
+            for i, req_t in enumerate(req_teams):
+                name = req_t.get('name', f"Team {i+1}")
+                institution = req_t.get('institution', 'Unknown')
                 members = req_t.get('members', [])
-            
-            t_obj = swiss_sim.Team(id=i, true_rank=0, name=name, members=members)
-            t_obj.institution = institution
-            teams.append(t_obj)
+                t_obj = swiss_sim.Team(id=i, true_rank=0, name=name, members=members)
+                t_obj.institution = institution
+                teams.append(t_obj)
+        elif num_teams and num_teams > 0:
+            for i in range(num_teams):
+                t_obj = swiss_sim.Team(id=i, true_rank=0, name=f"Team {i+1}", members=[])
+                t_obj.institution = "Unknown"
+                teams.append(t_obj)
             
         user_info = getattr(request, 'user_info', None)
         logger.info(f"init_tournament: user_info identified as: {user_info}")
@@ -557,14 +557,16 @@ def init_tournament(tournament_id):
         auto_approve = not GOOGLE_OAUTH_CLIENT_ID or is_super_admin(user_email)
         status = 'approved' if auto_approve else 'pending'
 
+        actual_num_teams = len(teams)
         data = {
             "config": {
-                "num_teams": num_teams,
+                "num_teams": actual_num_teams,
                 "num_prelim_rounds": rounds,
                 "num_elim_rounds": elim_rounds,
                 "num_rounds": rounds + elim_rounds,
             },
             "status": status,
+            "is_started": False,
             "requested_by": user_email if user_email else None,
             "requested_at": datetime.utcnow().isoformat(),
             "approved_by": user_email if auto_approve and user_email else None,
@@ -585,11 +587,11 @@ def init_tournament(tournament_id):
         }
         
         if save_tournament_to_gcs(data, tournament_id):
-            logger.info(f"Tournament {tournament_id} initialized with status {status}")
+            logger.info(f"Tournament {tournament_id} initialized with status {status} and {actual_num_teams} teams")
             log_event(
                 action="TOURNAMENT_INIT",
                 payload={
-                    "num_teams": num_teams,
+                    "num_teams": actual_num_teams,
                     "rounds": rounds,
                     "elim_rounds": elim_rounds,
                     "status": status,
@@ -783,6 +785,11 @@ def pair_round(tournament_id):
         if data.get('is_closed'):
             return jsonify({"error": "Forbidden: Tournament is closed and finalized"}), 403
             
+        if round_num == 1:
+            if len(teams) < 2:
+                return jsonify({"error": f"Cannot pair Round 1: At least 2 teams required to start tournament (currently registered: {len(teams)})"}), 400
+            data['is_started'] = True
+
         try:
             pairs = tm.pair_round_logic(data, teams, round_num)
         except ValueError as e:
@@ -823,6 +830,7 @@ def pair_round(tournament_id):
         data['rounds'].append([m['match_id'] for m in new_matches])
         data['next_match_id'] = next_match_id
         data['current_round'] = round_num
+        data['is_started'] = True
         
         if patched_save_tournament_with_id(data, teams, tournament_id):
             log_event(
@@ -837,6 +845,82 @@ def pair_round(tournament_id):
             
     except Exception as e:
         logger.error(f"Error in pair: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/t/<tournament_id>/start', methods=['POST'])
+@require_auth(allowed_roles=['admin'])
+def start_tournament_endpoint(tournament_id):
+    """Admin starts the tournament, closing registration and optionally pairing Round 1."""
+    try:
+        data, teams_objs = patched_load_tournament_with_id(tournament_id)
+        if not data:
+            return jsonify({"error": "Tournament not found"}), 404
+        if data.get('is_closed'):
+            return jsonify({"error": "Tournament is closed"}), 403
+        if data.get('is_started') or (data.get('matches') and len(data.get('matches')) > 0):
+            return jsonify({"error": "Tournament has already been started"}), 400
+        if len(teams_objs) < 2:
+            return jsonify({"error": f"Cannot start tournament: At least 2 teams required to start (currently registered: {len(teams_objs)})"}), 400
+
+        data['is_started'] = True
+        req = request.json or {}
+        pair_r1 = req.get('pair_round_1', True)
+        new_matches = []
+
+        if pair_r1:
+            try:
+                pairs = tm.pair_round_logic(data, teams_objs, 1)
+                next_match_id = data.get('next_match_id', 1)
+                for p in pairs:
+                    if len(p) == 1:
+                        m = {
+                            "match_id": next_match_id,
+                            "round_num": 1,
+                            "aff_id": p[0].id,
+                            "neg_id": -1,
+                            "aff_name": p[0].name,
+                            "neg_name": "BYE",
+                            "result": "A",
+                            "judge_id": -1,
+                            "speaker_points": None
+                        }
+                    else:
+                        m = {
+                            "match_id": next_match_id,
+                            "round_num": 1,
+                            "aff_id": p[0].id,
+                            "neg_id": p[1].id,
+                            "aff_name": p[0].name,
+                            "neg_name": p[1].name,
+                            "result": None,
+                            "judge_id": -1,
+                            "speaker_points": None
+                        }
+                    new_matches.append(m)
+                    next_match_id += 1
+                data.setdefault('matches', []).extend(new_matches)
+                data.setdefault('rounds', []).append([m['match_id'] for m in new_matches])
+                data['next_match_id'] = next_match_id
+                data['current_round'] = 1
+            except Exception as e:
+                return jsonify({"error": f"Error pairing Round 1: {str(e)}"}), 400
+
+        if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+            log_event(
+                action="TOURNAMENT_STARTED",
+                payload={"started_at": datetime.utcnow().isoformat(), "num_teams": len(teams_objs), "matches": new_matches},
+                tournament_id=tournament_id,
+                actor=get_current_actor()
+            )
+            return jsonify({
+                "message": f"Tournament started with {len(teams_objs)} teams. Registration is now closed.",
+                "is_started": True,
+                "matches": new_matches
+            }), 200
+        return jsonify({"error": "Failed to save tournament state"}), 500
+
+    except Exception as e:
+        logger.error(f"Error starting tournament {tournament_id}: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/t/<tournament_id>/report', methods=['POST'])
@@ -1235,9 +1319,9 @@ def register_team_endpoint(tournament_id):
             if not coach_institution or institution != coach_institution:
                 return jsonify({"error": f"Unauthorized: You can only register teams for {coach_institution}"}), 403
 
-        # Validation: cannot register new teams once tournament matches have been generated
-        if team_id is None and data.get('matches') and len(data.get('matches')) > 0:
-            return jsonify({"error": "Cannot register new teams after preliminary rounds have been paired"}), 400
+        # Validation: cannot register new teams once tournament has started or matches have been generated
+        if team_id is None and (data.get('is_started') or (data.get('matches') and len(data.get('matches')) > 0)):
+            return jsonify({"error": "Registration is closed: Cannot register new teams after tournament has started or preliminary rounds have been paired"}), 400
 
         # Add or update team
         if team_id is not None:
@@ -1470,9 +1554,9 @@ def submit_team_request_endpoint(tournament_id):
     if data.get('is_closed'):
         return jsonify({"error": "Tournament is closed"}), 403
 
-    # Cannot register new teams if preliminary matches have already been paired
-    if data.get('matches') and len(data.get('matches')) > 0:
-        return jsonify({"error": "Cannot register new teams after preliminary rounds have been paired"}), 400
+    # Cannot register new teams if tournament has started or matches have been paired
+    if data.get('is_started') or (data.get('matches') and len(data.get('matches')) > 0):
+        return jsonify({"error": "Registration is closed. Tournament has already started."}), 400
 
     req_data = request.json or {}
     team_name = req_data.get('name', '').strip()
@@ -1563,6 +1647,8 @@ def approve_team_request_endpoint(tournament_id, request_id):
         return jsonify({"error": "Tournament not found"}), 404
     if data.get('is_closed'):
         return jsonify({"error": "Tournament is closed"}), 403
+    if data.get('is_started') or (data.get('matches') and len(data.get('matches')) > 0):
+        return jsonify({"error": "Registration is closed. Cannot add new teams after tournament has started."}), 400
 
     requests = data.get('team_requests', {})
     if request_id not in requests:

@@ -349,6 +349,39 @@ class TournamentManager {
         return true;
     }
 
+    // Start tournament, lock registration, and optionally generate Round 1 pairings
+    async startTournament(pairRound1 = true) {
+        if (!this.backendUrl) {
+            this.data.is_started = true;
+            if (pairRound1 && (!this.data.matches || this.data.matches.length === 0)) {
+                await this.pairRound(1);
+            }
+            return { success: true, message: 'Tournament started.' };
+        }
+        try {
+            const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/start`, {
+                method: 'POST',
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify({ pair_round_1: pairRound1 })
+            });
+            if (response.ok) {
+                const res = await response.json();
+                this.data.is_started = true;
+                if (res.matches && res.matches.length > 0) {
+                    this.data.matches = res.matches;
+                    this.data.current_round = 1;
+                }
+                this.reconstructObjects();
+                return { success: true, message: res.message };
+            } else {
+                const err = await response.json();
+                return { success: false, error: err.error || 'Failed to start tournament' };
+            }
+        } catch (e) {
+            return { success: false, error: e.message };
+        }
+    }
+
     // Generate pairings for a round using Swiss system
     async pairRound(roundNum) {
         if (this.backendUrl) {

@@ -308,17 +308,42 @@ function showDashboard() {
 setupForm.addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    const numTeams = parseInt(document.getElementById('numTeams').value);
+    const numTeamsInput = parseInt(document.getElementById('numTeams').value);
+    const numTeams = isNaN(numTeamsInput) ? 0 : numTeamsInput;
     const numPrelimRounds = parseInt(document.getElementById('numRounds').value);
-    const numElimRounds = parseInt(document.getElementById('numElimRounds').value);
+    const numElimRounds = parseInt(document.getElementById('numElimRounds').value) || 0;
     const teamDataText = document.getElementById('teamData').value;
 
     // Parse team data: Format is "Team Name | Institution | Member 1 | Member 2"
     const teamDetails = [];
     const lines = teamDataText.split('\n').map(l => l.trim()).filter(l => l);
 
-    for (let i = 0; i < numTeams; i++) {
-        if (i < lines.length && lines[i]) {
+    if (numTeams > 0) {
+        for (let i = 0; i < numTeams; i++) {
+            if (i < lines.length && lines[i]) {
+                const parts = lines[i].split('|').map(p => p.trim());
+                teamDetails.push({
+                    name: parts[0] || `Team ${i + 1}`,
+                    institution: parts[1] || 'Unknown',
+                    members: [
+                        { name: parts[2] || `Member 1`, email: parts[3] || '' },
+                        { name: parts[4] || `Member 2`, email: parts[5] || '' }
+                    ]
+                });
+            } else {
+                // No data for this team, use defaults
+                teamDetails.push({
+                    name: `Team ${i + 1}`,
+                    institution: 'Unknown',
+                    members: [
+                        { name: `Member 1`, email: '' },
+                        { name: `Member 2`, email: '' }
+                    ]
+                });
+            }
+        }
+    } else if (lines.length > 0) {
+        for (let i = 0; i < lines.length; i++) {
             const parts = lines[i].split('|').map(p => p.trim());
             teamDetails.push({
                 name: parts[0] || `Team ${i + 1}`,
@@ -328,20 +353,10 @@ setupForm.addEventListener('submit', async (e) => {
                     { name: parts[4] || `Member 2`, email: parts[5] || '' }
                 ]
             });
-        } else {
-            // No data for this team, use defaults
-            teamDetails.push({
-                name: `Team ${i + 1}`,
-                institution: 'Unknown',
-                members: [
-                    { name: `Member 1`, email: '' },
-                    { name: `Member 2`, email: '' }
-                ]
-            });
         }
     }
 
-    const success = await tournament.init(numTeams, numPrelimRounds, numElimRounds, teamDetails);
+    const success = await tournament.init(teamDetails.length, numPrelimRounds, numElimRounds, teamDetails);
 
     if (success) {
         // Clear navigation history and hash for fresh start
@@ -1243,8 +1258,10 @@ async function showEntries() {
     const role = getUserRole();
     const isCoach = role === 'coach';
     const isAdmin = role === 'admin';
-    const canRegister = (isAdmin || isCoach) && !tournament.data.is_closed;
-    const canSelfRegister = currentUser && role === 'participant' && !tournament.data.is_closed && (!tournament.data.matches || tournament.data.matches.length === 0);
+    const isStarted = !!(tournament.data && (tournament.data.is_started || (tournament.data.matches && tournament.data.matches.length > 0)));
+    const canRegister = (isAdmin || isCoach) && !tournament.data.is_closed && !isStarted;
+    const canSelfRegister = currentUser && role === 'participant' && !tournament.data.is_closed && !isStarted;
+    const canStartTournament = isAdmin && !tournament.data.is_closed && !isStarted;
 
     let teamRequests = {};
     if (isAdmin || isCoach) {
@@ -1302,14 +1319,38 @@ async function showEntries() {
         ` : ''}
 
         <div class="card">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <h3>Team Entries List</h3>
-                <div style="display: flex; gap: 0.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <h3 style="margin: 0;">Team Entries (${teams.length})</h3>
+                    ${!isStarted ? `
+                        <span class="badge" style="background: #10b981; color: white; font-size: 0.8rem; padding: 0.25rem 0.6rem; border-radius: 4px; font-weight: 600;">Registration Open</span>
+                    ` : `
+                        <span class="badge" style="background: #3b82f6; color: white; font-size: 0.8rem; padding: 0.25rem 0.6rem; border-radius: 4px; font-weight: 600;">Tournament Started (Registration Closed)</span>
+                    `}
+                </div>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    ${canStartTournament ? `
+                        <button class="btn btn-success" style="background: #16a34a; font-weight: 600;" onclick="handleStartTournament()">
+                            ▶ Start Tournament (Pair R1)
+                        </button>
+                    ` : ''}
                     ${canRegister ? `<button class="btn btn-primary" onclick="showRegisterTeamForm()">+ Register Team</button>` : ''}
                     ${canSelfRegister ? `<button class="btn btn-primary" onclick="showRegisterTeamForm()">+ Self-Register Team</button>` : ''}
                 </div>
             </div>
-            <p class="text-muted">Total Teams: ${teams.length}</p>
+
+            ${teams.length === 0 ? `
+                <div style="text-align: center; padding: 2.5rem 1rem; background: var(--bg-secondary); border-radius: 8px; border: 1px dashed var(--border-color); margin: 1rem 0;">
+                    <p style="font-size: 1.15rem; font-weight: 600; color: var(--text-color); margin-bottom: 0.5rem;">No teams registered yet.</p>
+                    <p class="text-muted" style="margin-top: 0; max-width: 520px; margin-left: auto; margin-right: auto; line-height: 1.5;">
+                        Registration is open! Approved school coaches can register their teams, and students can submit team entries for coach verification.
+                    </p>
+                    <div style="display: flex; gap: 0.75rem; justify-content: center; margin-top: 1rem;">
+                        ${canRegister ? `<button class="btn btn-primary" onclick="showRegisterTeamForm()">+ Register First Team</button>` : ''}
+                        ${canSelfRegister ? `<button class="btn btn-primary" onclick="showRegisterTeamForm()">+ Submit Team Registration</button>` : ''}
+                    </div>
+                </div>
+            ` : `
             <table class="standings-table">
                 <thead>
                     <tr>
@@ -1357,8 +1398,39 @@ async function showEntries() {
                     }).join('')}
                 </tbody>
             </table>
+            `}
         </div>
     `;
+}
+
+window.handleStartTournament = async function () {
+    const teamCount = (tournament.teams && tournament.teams.length) || 0;
+    if (teamCount < 2) {
+        showNotification('Cannot Start Tournament', `At least 2 teams must be registered to start the tournament. Currently registered: ${teamCount}`);
+        return;
+    }
+    const confirmed = confirm(
+        `Start tournament with ${teamCount} teams?\n\n` +
+        `This will permanently CLOSE team registration and generate Round 1 pairings.`
+    );
+    if (!confirmed) return;
+
+    showLoading('Starting tournament and pairing Round 1...');
+    try {
+        const res = await tournament.startTournament(true);
+        if (res.success) {
+            showNotification('Tournament Started', res.message || 'Tournament started! Round 1 pairings are ready.');
+            updateDashboard();
+            showRound(1);
+        } else {
+            showNotification('Error', res.error || 'Failed to start tournament');
+        }
+    } catch (e) {
+        showNotification('Error', e.message);
+    } finally {
+        hideLoading();
+    }
+};
 }
 
 // Show Judges
@@ -2936,6 +3008,10 @@ window.linkSecondaryEmail = async function () {
 
 // Team Modal Logic
 window.showRegisterTeamForm = function (teamId = null) {
+    if (tournament.data && (tournament.data.is_started || (tournament.data.matches && tournament.data.matches.length > 0))) {
+        showNotification('Registration Closed', 'Team registration is closed because the tournament has already started.');
+        return;
+    }
     const role = getUserRole();
     if (!currentUser && role !== 'admin') {
         showNotification('Login Required', 'Please sign in with Google to register a team.');

@@ -166,6 +166,7 @@ class ReplayEngine:
                     "num_rounds": rounds + elim_rounds,
                 },
                 "status": p.get("status", "approved"),
+                "is_started": p.get("is_started", False),
                 "requested_by": p.get("requested_by") or (actor if actor != "system" else None),
                 "requested_at": p.get("requested_at") or ts,
                 "approved_by": p.get("approved_by"),
@@ -195,6 +196,18 @@ class ReplayEngine:
                 data["status"] = "approved"
                 data["approved_by"] = actor
                 data["approved_at"] = ts
+                self._save_t(tid, data)
+
+        elif action == "TOURNAMENT_STARTED":
+            data = self._load_t(tid)
+            if data:
+                data["is_started"] = True
+                new_matches = p.get("matches", [])
+                if new_matches and not data.get("matches"):
+                    data["current_round"] = 1
+                    data.setdefault("matches", []).extend(new_matches)
+                    data.setdefault("rounds", []).append([m.get("match_id") for m in new_matches])
+                    data["next_match_id"] = max([m.get("match_id", 0) for m in data["matches"]], default=0) + 1
                 self._save_t(tid, data)
 
         elif action in ("TOURNAMENT_REJECTED", "TOURNAMENT_RESET"):
@@ -517,6 +530,7 @@ def validate_event_rules(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "initialized": False,
                 "status": "pending",
                 "closed": False,
+                "started": False,
                 "current_round": 0,
                 "matches": set(),
                 "judges": set(),
@@ -573,9 +587,13 @@ def validate_event_rules(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if action == "TOURNAMENT_APPROVED":
             st["status"] = "approved"
 
+        elif action == "TOURNAMENT_STARTED":
+            st["started"] = True
+
         elif action in ("TOURNAMENT_REJECTED", "TOURNAMENT_RESET"):
             st["initialized"] = False
             st["closed"] = True
+            st["started"] = False
 
         elif action == "TOURNAMENT_CLOSED":
             st["closed"] = True
@@ -602,11 +620,25 @@ def validate_event_rules(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             st["coaches"].discard(email)
 
         elif action == "TEAM_REQUESTED":
+            if st.get("started"):
+                violations.append({
+                    "rule": "REGISTRATION_AFTER_START",
+                    "message": f"Event #{idx} (TEAM_REQUESTED) submitted after tournament '{tid}' was started",
+                    "event_index": idx,
+                    "event": e
+                })
             req_id = p.get("id")
             if req_id:
                 st["team_requests"].add(req_id)
 
         elif action == "TEAM_APPROVED":
+            if st.get("started"):
+                violations.append({
+                    "rule": "REGISTRATION_AFTER_START",
+                    "message": f"Event #{idx} (TEAM_APPROVED) approved after tournament '{tid}' was started",
+                    "event_index": idx,
+                    "event": e
+                })
             req_id = p.get("request_id")
             if req_id and req_id not in st["team_requests"]:
                 violations.append({
@@ -657,6 +689,7 @@ def validate_event_rules(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 })
 
         elif action == "ROUND_PAIRED":
+            st["started"] = True
             round_num = p.get("round_num", st["current_round"] + 1)
             expected_round = st["current_round"] + 1
             if round_num != expected_round:
