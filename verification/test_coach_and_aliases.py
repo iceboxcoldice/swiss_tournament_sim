@@ -337,5 +337,81 @@ class TestCoachAndAliases(unittest.TestCase):
             data, _ = main.patched_load_tournament_with_id('bad-request')
             self.assertFalse(data)
 
+    def test_coach_request_and_approval_workflow(self):
+        with patch('main.GOOGLE_OAUTH_CLIENT_ID', 'test-client-id'), \
+             patch('main.verify_google_token') as mock_verify:
+            
+            # 1. User prospect@school.edu submits coach request for Dartmouth
+            mock_verify.return_value = {'email': 'prospect@school.edu', 'name': 'Prospect Coach'}
+            res = self.app.post(
+                f'/api/t/{self.tournament_id}/coach_requests',
+                headers={'Authorization': 'Bearer prospect-token'},
+                json={'institution': 'Dartmouth'}
+            )
+            self.assertEqual(res.status_code, 200)
+            self.assertIn('submitted successfully', res.get_json()['message'])
+            self.assertEqual(res.get_json()['request']['institution'], 'Dartmouth')
+
+            # 2. Admin lists coach requests
+            mock_verify.return_value = {'email': 'admin@example.com'}
+            res = self.app.get(
+                f'/api/t/{self.tournament_id}/coach_requests',
+                headers={'Authorization': 'Bearer admin-token'}
+            )
+            self.assertEqual(res.status_code, 200)
+            reqs = res.get_json()['coach_requests']
+            self.assertIn('prospect@school.edu', reqs)
+            self.assertEqual(reqs['prospect@school.edu']['institution'], 'Dartmouth')
+
+            # 3. Non-admin attempts to approve -> 403 Forbidden
+            mock_verify.return_value = {'email': 'unauth@example.com'}
+            res = self.app.post(
+                f'/api/t/{self.tournament_id}/coach_requests/prospect@school.edu/approve',
+                headers={'Authorization': 'Bearer unauth-token'}
+            )
+            self.assertEqual(res.status_code, 403)
+
+            # 4. Admin approves coach request
+            mock_verify.return_value = {'email': 'admin@example.com'}
+            res = self.app.post(
+                f'/api/t/{self.tournament_id}/coach_requests/prospect@school.edu/approve',
+                headers={'Authorization': 'Bearer admin-token'}
+            )
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertEqual(data['coaches']['prospect@school.edu'], 'Dartmouth')
+            self.assertNotIn('prospect@school.edu', data['coach_requests'])
+
+            # 5. Now approved coach can register a team for Dartmouth
+            mock_verify.return_value = {'email': 'prospect@school.edu'}
+            res = self.app.post(
+                f'/api/t/{self.tournament_id}/register_team',
+                headers={'Authorization': 'Bearer prospect-token'},
+                json={
+                    'name': 'Dartmouth Alpha',
+                    'institution': 'Dartmouth',
+                    'member1_name': 'Dan',
+                    'member2_name': 'Dave'
+                }
+            )
+            self.assertEqual(res.status_code, 200)
+
+            # 6. User submits bad request, admin rejects
+            mock_verify.return_value = {'email': 'bad_applicant@spam.com', 'name': 'Spam'}
+            self.app.post(
+                f'/api/t/{self.tournament_id}/coach_requests',
+                headers={'Authorization': 'Bearer spam-token'},
+                json={'institution': 'FakeSchool'}
+            )
+            mock_verify.return_value = {'email': 'admin@example.com'}
+            res = self.app.post(
+                f'/api/t/{self.tournament_id}/coach_requests/bad_applicant@spam.com/reject',
+                headers={'Authorization': 'Bearer admin-token'}
+            )
+            self.assertEqual(res.status_code, 200)
+            t_data, _ = main.patched_load_tournament_with_id(self.tournament_id)
+            self.assertNotIn('bad_applicant@spam.com', t_data['auth'].get('coaches', {}))
+            self.assertNotIn('bad_applicant@spam.com', t_data['auth'].get('coach_requests', {}))
+
 if __name__ == '__main__':
     unittest.main()

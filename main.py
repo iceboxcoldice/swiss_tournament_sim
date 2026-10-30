@@ -1169,6 +1169,107 @@ def remove_coach_endpoint(tournament_id, coach_email):
         return jsonify({"error": "Failed to save tournament data"}), 500
     return jsonify({"error": f"Coach {email} not found"}), 404
 
+@app.route('/api/t/<tournament_id>/coach_requests', methods=['POST'])
+@require_auth()
+def submit_coach_request_endpoint(tournament_id):
+    """Allow an authenticated user to submit a request to be a coach for an institution."""
+    user_info = getattr(request, 'user_info', None)
+    if not user_info or not user_info.get('email'):
+        return jsonify({"error": "Unauthorized: Login required"}), 401
+    
+    email = user_info.get('email').lower().strip()
+    name = user_info.get('name', email)
+    req = request.json or {}
+    institution = req.get('institution', '').strip()
+    if not institution:
+        return jsonify({"error": "Institution name is required"}), 400
+
+    data, teams_objs = patched_load_tournament_with_id(tournament_id)
+    if not data:
+        return jsonify({"error": "Tournament not found"}), 404
+    if data.get('is_closed'):
+        return jsonify({"error": "Tournament is closed"}), 403
+
+    if 'auth' not in data:
+        data['auth'] = {'admins': [], 'judges': {}, 'coaches': {}, 'coach_requests': {}}
+    if 'coach_requests' not in data['auth']:
+        data['auth']['coach_requests'] = {}
+
+    data['auth']['coach_requests'][email] = {
+        'email': email,
+        'name': name,
+        'institution': institution,
+        'requested_at': datetime.utcnow().isoformat()
+    }
+
+    if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+        return jsonify({
+            "message": f"Coach request for {institution} submitted successfully",
+            "request": data['auth']['coach_requests'][email]
+        }), 200
+    return jsonify({"error": "Failed to save coach request"}), 500
+
+@app.route('/api/t/<tournament_id>/coach_requests', methods=['GET'])
+@require_auth(allowed_roles=['admin'])
+def get_coach_requests_endpoint(tournament_id):
+    """List all pending coach requests for a tournament (Admin only)."""
+    data, _ = patched_load_tournament_with_id(tournament_id)
+    if not data:
+        return jsonify({"error": "Tournament not found"}), 404
+    auth_data = data.get('auth', {})
+    coach_requests = auth_data.get('coach_requests', {})
+    return jsonify({"coach_requests": coach_requests}), 200
+
+@app.route('/api/t/<tournament_id>/coach_requests/<path:coach_email>/approve', methods=['POST'])
+@require_auth(allowed_roles=['admin'])
+def approve_coach_request_endpoint(tournament_id, coach_email):
+    """Approve a pending coach request and grant them coach privileges (Admin only)."""
+    data, teams_objs = patched_load_tournament_with_id(tournament_id)
+    if not data:
+        return jsonify({"error": "Tournament not found"}), 404
+    email = coach_email.lower().strip()
+    auth_data = data.get('auth', {})
+    requests = auth_data.get('coach_requests', {})
+    
+    if email not in requests:
+        return jsonify({"error": f"No pending coach request found for {email}"}), 404
+
+    req_entry = requests.pop(email)
+    institution = req_entry.get('institution')
+
+    if 'coaches' not in auth_data:
+        auth_data['coaches'] = {}
+    auth_data['coaches'][email] = institution
+
+    if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+        return jsonify({
+            "message": f"Coach {email} approved for {institution}",
+            "coaches": auth_data['coaches'],
+            "coach_requests": requests
+        }), 200
+    return jsonify({"error": "Failed to save tournament data"}), 500
+
+@app.route('/api/t/<tournament_id>/coach_requests/<path:coach_email>/reject', methods=['POST'])
+@require_auth(allowed_roles=['admin'])
+def reject_coach_request_endpoint(tournament_id, coach_email):
+    """Reject and remove a pending coach request (Admin only)."""
+    data, teams_objs = patched_load_tournament_with_id(tournament_id)
+    if not data:
+        return jsonify({"error": "Tournament not found"}), 404
+    email = coach_email.lower().strip()
+    auth_data = data.get('auth', {})
+    requests = auth_data.get('coach_requests', {})
+
+    if email in requests:
+        del requests[email]
+        if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+            return jsonify({
+                "message": f"Coach request for {email} rejected",
+                "coach_requests": requests
+            }), 200
+        return jsonify({"error": "Failed to save tournament data"}), 500
+    return jsonify({"error": f"No pending request found for {email}"}), 404
+
 @app.route('/api/user/super_admin_status', methods=['GET'])
 @require_auth()
 def get_super_admin_status():

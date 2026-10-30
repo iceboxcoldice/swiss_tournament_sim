@@ -679,6 +679,14 @@ function updateDashboard() {
         tournamentInfo.innerHTML += ` • <span style="color:var(--primary); font-weight:600">Coach (${institution})</span>`;
     } else if (role === 'judge') {
         tournamentInfo.innerHTML += ` • <span style="color:var(--primary); font-weight:600">Judge</span>`;
+    } else if (currentUser && role === 'participant') {
+        const reqs = (tournament.data.auth && tournament.data.auth.coach_requests) || {};
+        const myReq = reqs[currentUser.email.toLowerCase()];
+        if (myReq) {
+            tournamentInfo.innerHTML += ` • <span style="background: #fef3c7; color: #b45309; padding: 0.15rem 0.45rem; border-radius: 3px; font-size: 0.75rem; font-weight: 600;">Coach Request Pending (${myReq.institution})</span>`;
+        } else if (!tournament.data.is_closed) {
+            tournamentInfo.innerHTML += ` <button class="btn btn-sm btn-outline" style="margin-left: 0.5rem; padding: 0.2rem 0.5rem; font-size: 0.8rem;" onclick="promptCoachRequest()">Request Coach Access</button>`;
+        }
     }
 }
 
@@ -1431,15 +1439,60 @@ async function showCoaches() {
     }
 
     let coaches = {};
+    let coachRequests = {};
     try {
         coaches = await tournament.fetchCoaches();
+        coachRequests = await tournament.fetchCoachRequests();
     } catch (e) {
         coaches = (tournament.data && tournament.data.auth && tournament.data.auth.coaches) || {};
+        coachRequests = (tournament.data && tournament.data.auth && tournament.data.auth.coach_requests) || {};
     }
 
     const coachEmails = Object.keys(coaches || {}).sort();
+    const requestEmails = Object.keys(coachRequests || {}).sort();
 
     tabContent.innerHTML = `
+        ${requestEmails.length > 0 ? `
+        <div class="card" style="border: 1px solid #f59e0b; background: #fffdf5; margin-bottom: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h3 style="color: #b45309; margin: 0;">⏳ Pending Coach Requests</h3>
+                <span style="background: #fef3c7; color: #b45309; padding: 0.2rem 0.6rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem;">${requestEmails.length} Pending</span>
+            </div>
+            <p class="text-muted" style="margin-top: 0;">The following accounts have requested coaching access to register and manage teams for their institutions:</p>
+            <table class="standings-table">
+                <thead>
+                    <tr>
+                        <th>Applicant</th>
+                        <th>Email</th>
+                        <th>Requested Institution</th>
+                        <th>Requested At</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${requestEmails.map(email => {
+                        const req = coachRequests[email] || {};
+                        const formattedDate = req.requested_at ? new Date(req.requested_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+                        return `
+                            <tr>
+                                <td><strong>${req.name || '—'}</strong></td>
+                                <td style="font-family: monospace;">${email}</td>
+                                <td><span style="font-weight: 600; color: var(--primary);">${req.institution || '—'}</span></td>
+                                <td class="text-muted" style="font-size: 0.85em;">${formattedDate}</td>
+                                <td>
+                                    <div style="display: flex; gap: 0.5rem;">
+                                        <button class="btn btn-sm btn-primary" onclick="handleApproveCoachRequest('${email.replace(/'/g, "\\'")}')">Approve</button>
+                                        <button class="btn btn-sm btn-danger" onclick="handleRejectCoachRequest('${email.replace(/'/g, "\\'")}')">Reject</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+        ` : ''}
+
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                 <h3>School Coaches</h3>
@@ -2528,6 +2581,60 @@ window.deleteCoach = function (email) {
                 showNotification('Success', `Coach "${email}" removed successfully!`);
             } catch (error) {
                 showNotification('Error', error.message);
+            }
+        }
+    );
+};
+
+window.promptCoachRequest = function () {
+    if (!currentUser) {
+        showNotification('Login Required', 'Please sign in with Google to request coach access for this tournament.');
+        return;
+    }
+    const inst = prompt("Enter the name of your school or institution (e.g., 'Harvard', 'Dartmouth'):");
+    if (!inst || !inst.trim()) return;
+
+    showLoading("Submitting coach request...");
+    tournament.requestCoachAccess(inst.trim())
+        .then(res => {
+            showNotification("Success", res.message || "Coach request submitted!");
+            updateDashboard();
+        })
+        .catch(err => {
+            showNotification("Error", err.message);
+        })
+        .finally(() => {
+            hideLoading();
+        });
+};
+
+window.handleApproveCoachRequest = async function (email) {
+    showLoading(`Approving coach ${email}...`);
+    try {
+        const res = await tournament.approveCoachRequest(email);
+        showNotification("Success", res.message || `Coach ${email} approved!`);
+        await showCoaches();
+    } catch (e) {
+        showNotification("Error", e.message);
+    } finally {
+        hideLoading();
+    }
+};
+
+window.handleRejectCoachRequest = function (email) {
+    showConfirm(
+        'Reject Coach Request',
+        `Are you sure you want to reject the coaching request for "${email}"?`,
+        async () => {
+            showLoading(`Rejecting coach request...`);
+            try {
+                const res = await tournament.rejectCoachRequest(email);
+                showNotification("Success", res.message || `Request for ${email} rejected.`);
+                await showCoaches();
+            } catch (e) {
+                showNotification("Error", e.message);
+            } finally {
+                hideLoading();
             }
         }
     );

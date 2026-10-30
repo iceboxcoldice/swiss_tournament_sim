@@ -677,6 +677,113 @@ class TournamentManager {
         }
     }
 
+    // Submit a request to be a coach for an institution
+    async requestCoachAccess(institution) {
+        if (!this.backendUrl || !this.tournamentId) {
+            // Local fallback
+            if (!this.data.auth) this.data.auth = { admins: [], judges: {}, coaches: {}, coach_requests: {} };
+            if (!this.data.auth.coaches) this.data.auth.coaches = {};
+            this.data.auth.coaches['local_coach'] = institution;
+            this.saveToStorage();
+            return { message: `Coach access granted for ${institution}` };
+        }
+
+        const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/coach_requests`, {
+            method: 'POST',
+            headers: this.getAuthHeaders(),
+            body: JSON.stringify({ institution })
+        });
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'Failed to submit coach request');
+        }
+        return await response.json();
+    }
+
+    // Fetch pending coach requests (Admin only)
+    async fetchCoachRequests() {
+        if (!this.backendUrl || !this.tournamentId) {
+            return (this.data && this.data.auth && this.data.auth.coach_requests) || {};
+        }
+        try {
+            const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/coach_requests`, {
+                headers: this.getAuthHeaders()
+            });
+            if (response.ok) {
+                const res = await response.json();
+                if (this.data) {
+                    if (!this.data.auth) this.data.auth = { admins: [], judges: {}, coaches: {}, coach_requests: {} };
+                    this.data.auth.coach_requests = res.coach_requests || {};
+                    this.saveToStorage();
+                }
+                return res.coach_requests || {};
+            }
+        } catch (e) {
+            console.error("Failed to fetch coach requests:", e);
+        }
+        return (this.data && this.data.auth && this.data.auth.coach_requests) || {};
+    }
+
+    // Approve a coach request (Admin only)
+    async approveCoachRequest(email) {
+        email = email.toLowerCase().trim();
+        if (this.backendUrl && this.tournamentId) {
+            const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/coach_requests/${encodeURIComponent(email)}/approve`, {
+                method: 'POST',
+                headers: this.getAuthHeaders()
+            });
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || 'Failed to approve coach request');
+            }
+            const res = await response.json();
+            if (this.data && this.data.auth) {
+                this.data.auth.coaches = res.coaches || this.data.auth.coaches;
+                this.data.auth.coach_requests = res.coach_requests || {};
+                this.saveToStorage();
+            }
+            return res;
+        } else {
+            // Local mode
+            if (this.data && this.data.auth) {
+                if (!this.data.auth.coaches) this.data.auth.coaches = {};
+                const reqs = this.data.auth.coach_requests || {};
+                const inst = reqs[email]?.institution || 'Unknown';
+                this.data.auth.coaches[email] = inst;
+                delete reqs[email];
+                this.saveToStorage();
+            }
+            return { success: true };
+        }
+    }
+
+    // Reject a coach request (Admin only)
+    async rejectCoachRequest(email) {
+        email = email.toLowerCase().trim();
+        if (this.backendUrl && this.tournamentId) {
+            const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/coach_requests/${encodeURIComponent(email)}/reject`, {
+                method: 'POST',
+                headers: this.getAuthHeaders()
+            });
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || 'Failed to reject coach request');
+            }
+            const res = await response.json();
+            if (this.data && this.data.auth) {
+                this.data.auth.coach_requests = res.coach_requests || {};
+                this.saveToStorage();
+            }
+            return res;
+        } else {
+            if (this.data && this.data.auth && this.data.auth.coach_requests) {
+                delete this.data.auth.coach_requests[email];
+                this.saveToStorage();
+            }
+            return { success: true };
+        }
+    }
+
     // Approve a pending tournament (Super Admin)
     async approveTournament(tournamentId) {
         if (!this.backendUrl) return { status: 'approved' };
