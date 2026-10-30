@@ -124,20 +124,23 @@ class TournamentManager {
 
     /**
      * Returns the effective backend URL.
-     * Falls back to window.location.origin only when served from a local backend (e.g. Docker / local dev server)
-     * but no explicit backendUrl was configured via the Cloud modal.
-     * Static hosts like GitHub Pages (*.github.io) or file:// are never treated as backend servers.
+     * Defaults to the Google App Engine backend (https://tabroom2.appspot.com) on GitHub Pages.
+     * When running locally (e.g. Docker / local dev server), uses window.location.origin.
+     * Returns null only if explicitly set to local mode.
      */
     getEffectiveBackendUrl() {
+        if (this.backendUrl === 'local') return null;
         if (this.backendUrl) return this.backendUrl;
         if (typeof window !== 'undefined' && window.location.origin) {
             const hostname = window.location.hostname || '';
-            const isStaticHost = hostname.endsWith('github.io') || window.location.protocol === 'file:';
-            if (!isStaticHost && (hostname === 'localhost' || hostname === '127.0.0.1' || (window.location.port && window.location.port !== '80' && window.location.port !== '443'))) {
+            if (hostname.endsWith('github.io')) {
+                return 'https://tabroom2.appspot.com';
+            }
+            if (hostname === 'localhost' || hostname === '127.0.0.1' || (window.location.port && window.location.port !== '80' && window.location.port !== '443')) {
                 return window.location.origin;
             }
         }
-        return null;
+        return 'https://tabroom2.appspot.com';
     }
 
     setBackendUrl(url) {
@@ -145,7 +148,7 @@ class TournamentManager {
         if (url) {
             localStorage.setItem('backendUrl', url);
         } else {
-            localStorage.removeItem('backendUrl');
+            localStorage.setItem('backendUrl', 'local');
         }
     }
 
@@ -157,20 +160,23 @@ class TournamentManager {
     async loadFromStorage() {
         // Try to load backend URL and tournament ID first
         const savedUrl = localStorage.getItem('backendUrl');
-        if (savedUrl) {
+        if (savedUrl === 'local') {
+            this.backendUrl = null;
+        } else if (savedUrl) {
             if (savedUrl.includes('github.io')) {
                 localStorage.removeItem('backendUrl');
-                this.backendUrl = null;
+                this.backendUrl = 'https://tabroom2.appspot.com';
             } else {
                 this.backendUrl = savedUrl;
             }
         } else if (typeof window !== 'undefined' && window.location.origin) {
             const hostname = window.location.hostname || '';
-            const isStaticHost = hostname.endsWith('github.io') || window.location.protocol === 'file:';
-            if (!isStaticHost && (hostname === 'localhost' || hostname === '127.0.0.1' || (window.location.port && window.location.port !== '80' && window.location.port !== '443'))) {
+            if (hostname.endsWith('github.io')) {
+                this.backendUrl = 'https://tabroom2.appspot.com';
+            } else if (hostname === 'localhost' || hostname === '127.0.0.1' || (window.location.port && window.location.port !== '80' && window.location.port !== '443')) {
                 this.backendUrl = window.location.origin;
             } else {
-                this.backendUrl = null;
+                this.backendUrl = 'https://tabroom2.appspot.com';
             }
         }
         const savedId = localStorage.getItem('tournamentId');
