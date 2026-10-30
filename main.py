@@ -48,6 +48,68 @@ def is_super_admin(email):
         return False
     return email.lower().strip() in SUPER_ADMIN_EMAILS
 
+import event_replay
+
+def get_current_actor():
+    """Retrieve current actor's email or identifier from request context."""
+    user_info = getattr(request, 'user_info', None)
+    if user_info and user_info.get('email'):
+        return user_info.get('email').lower().strip()
+    actor_header = request.headers.get('X-User-Email')
+    if actor_header:
+        return actor_header.lower().strip()
+    return 'system'
+
+def log_event(action, payload, tournament_id=None, actor=None):
+    """Log an immutable event to the journal (local and/or GCS)."""
+    try:
+        actor_email = actor or get_current_actor()
+        storage_dir = LOCAL_STORAGE_DIR
+        gcs_bucket = None
+        if BUCKET_NAME:
+            try:
+                gcs_bucket = get_storage_client().bucket(BUCKET_NAME)
+            except Exception as e:
+                logger.error(f"Error accessing GCS bucket for event log: {e}")
+        return event_replay.record_event(
+            storage_dir=storage_dir,
+            action=action,
+            payload=payload,
+            actor=actor_email,
+            tournament_id=tournament_id,
+            gcs_bucket=gcs_bucket
+        )
+    except Exception as e:
+        logger.error(f"Failed to record event {action}: {e}")
+        return None
+
+def load_events_from_storage(tournament_id=None):
+    """Load sequential event stream from GCS or local storage."""
+    if BUCKET_NAME:
+        try:
+            client = get_storage_client()
+            bucket = client.bucket(BUCKET_NAME)
+            path = f"tournaments/{tournament_id}/{event_replay.EVENTS_LOG_FILE}" if tournament_id else f"events/{event_replay.EVENTS_LOG_FILE}"
+            blob = bucket.blob(path)
+            if not blob.exists():
+                return []
+            content = blob.download_as_text()
+            events = []
+            for line in content.splitlines():
+                line = line.strip()
+                if line:
+                    try:
+                        events.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+            return events
+        except Exception as e:
+            logger.error(f"Error loading events from GCS: {e}")
+            return []
+    else:
+        log_path = event_replay.get_event_log_path(LOCAL_STORAGE_DIR, tournament_id)
+        return event_replay.load_events(log_path)
+
 if not BUCKET_NAME:
     logger.info("GCS_BUCKET_NAME not set. Using local filesystem storage.")
     if not os.path.exists(LOCAL_STORAGE_DIR):
@@ -313,8 +375,12 @@ def require_auth(allowed_roles=None):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             if not GOOGLE_OAUTH_CLIENT_ID:
-                logger.warning("GOOGLE_OAUTH_CLIENT_ID NOT SET. Auth verification is BYPASSED. user_info will be None.")
-                request.user_info = None
+                dev_email = request.headers.get('X-User-Email')
+                if dev_email:
+                    request.user_info = {'email': dev_email.lower().strip(), 'name': dev_email.split('@')[0]}
+                else:
+                    logger.warning("GOOGLE_OAUTH_CLIENT_ID NOT SET. Auth verification is BYPASSED. user_info will be None.")
+                    request.user_info = None
                 return f(*args, **kwargs)
                 
             auth_header = request.headers.get('Authorization')
@@ -506,6 +572,7 @@ def init_tournament(tournament_id):
             "current_round": 0,
             "rounds": [],
             "teams": [asdict(t) for t in teams],
+            "judges": [],
             "matches": [],
             "next_match_id": 1,
             "tournament_id": tournament_id,
@@ -513,11 +580,31 @@ def init_tournament(tournament_id):
                 "admins": [user_email] if user_email else [],
                 "judges": {},
                 "coaches": {}
-            }
+            },
+            "team_requests": {}
         }
         
         if save_tournament_to_gcs(data, tournament_id):
             logger.info(f"Tournament {tournament_id} initialized with status {status}")
+            log_event(
+                action="TOURNAMENT_INIT",
+                payload={
+                    "num_teams": num_teams,
+                    "rounds": rounds,
+                    "elim_rounds": elim_rounds,
+                    "status": status,
+                    "requested_by": data.get("requested_by"),
+                    "requested_at": data.get("requested_at"),
+                    "approved_by": data.get("approved_by"),
+                    "approved_at": data.get("approved_at"),
+                    "teams": data.get("teams", []),
+                    "judges": data.get("judges", []),
+                    "auth": data.get("auth", {}),
+                    "team_requests": data.get("team_requests", {})
+                },
+                tournament_id=tournament_id,
+                actor=user_email or 'system'
+            )
             msg = "Tournament initialized" if auto_approve else "Tournament creation request submitted and pending super admin approval"
             return jsonify({"message": msg, "status": status, "config": data['config']}), 200
         else:
@@ -591,6 +678,12 @@ def manage_judge(tournament_id):
                 data['auth']['judges'][str(judge_id)] = email
             
             if patched_save_tournament_with_id(data, teams, tournament_id):
+                log_event(
+                    action="JUDGE_ADDED",
+                    payload={"judge": new_judge},
+                    tournament_id=tournament_id,
+                    actor=get_current_actor()
+                )
                 return jsonify({"message": "Judge added", "judge": new_judge}), 200
             else:
                 return jsonify({"error": "Failed to save judge"}), 500
@@ -606,6 +699,12 @@ def manage_judge(tournament_id):
                 data['auth']['judges'].pop(str(judge_id), None)
             
             if patched_save_tournament_with_id(data, teams, tournament_id):
+                log_event(
+                    action="JUDGE_REMOVED",
+                    payload={"judge_id": judge_id},
+                    tournament_id=tournament_id,
+                    actor=get_current_actor()
+                )
                 return jsonify({"message": f"Judge {judge_id} removed"}), 200
             else:
                 return jsonify({"error": "Failed to save judge removal"}), 500
@@ -652,6 +751,12 @@ def assign_judge(tournament_id):
         match['judge_id'] = new_judge_id
 
         if patched_save_tournament_with_id(data, teams, tournament_id):
+            log_event(
+                action="JUDGE_ASSIGNED",
+                payload={"match_id": match_id, "judge_id": new_judge_id},
+                tournament_id=tournament_id,
+                actor=get_current_actor()
+            )
             return jsonify({"message": f"Judge assignment updated for match {match_id}"}), 200
         else:
             return jsonify({"error": "Failed to save judge assignment"}), 500
@@ -720,6 +825,12 @@ def pair_round(tournament_id):
         data['current_round'] = round_num
         
         if patched_save_tournament_with_id(data, teams, tournament_id):
+            log_event(
+                action="ROUND_PAIRED",
+                payload={"round_num": round_num, "matches": new_matches},
+                tournament_id=tournament_id,
+                actor=get_current_actor()
+            )
             return jsonify({"message": f"Round {round_num} paired", "matches": new_matches}), 200
         else:
             return jsonify({"error": "Failed to save pairings"}), 500
@@ -781,6 +892,17 @@ def report_result(tournament_id):
         tm.recalculate_stats(data, teams, team_map)
         
         if patched_save_tournament_with_id(data, teams, tournament_id):
+            log_event(
+                action="BALLOT_REPORTED",
+                payload={
+                    "match_id": match_id,
+                    "result": result,
+                    "judge_id": judge_id,
+                    "speaker_points": speaker_points
+                },
+                tournament_id=tournament_id,
+                actor=get_current_actor()
+            )
             return jsonify({"message": f"Reported result for Match {match_id}"}), 200
         else:
             return jsonify({"error": "Failed to save result"}), 500
@@ -809,6 +931,12 @@ def reset_tournament(tournament_id):
             if blob.exists():
                 blob.delete()
                 logger.info(f"Tournament {tournament_id} data SUCCESSFULLY deleted from GCS")
+                log_event(
+                    action="TOURNAMENT_RESET",
+                    payload={"reset": True},
+                    tournament_id=tournament_id,
+                    actor=get_current_actor()
+                )
                 return jsonify({"message": f"Tournament {tournament_id} data cleared"}), 200
             else:
                 logger.warning(f"Tournament data blob NOT FOUND for {tournament_id} during reset request")
@@ -824,6 +952,12 @@ def reset_tournament(tournament_id):
                 except OSError:
                     pass # Not empty or other error, fine
                 logger.info(f"Tournament {tournament_id} data SUCCESSFULLY deleted from Local Storage")
+                log_event(
+                    action="TOURNAMENT_RESET",
+                    payload={"reset": True},
+                    tournament_id=tournament_id,
+                    actor=get_current_actor()
+                )
                 return jsonify({"message": f"Tournament {tournament_id} data cleared"}), 200
             else:
                 logger.warning(f"Tournament data file NOT FOUND for {tournament_id} during local reset request")
@@ -856,6 +990,11 @@ def update_judge_profile_endpoint():
     profile['paradigm'] = paradigm_text
     
     if save_judge_profile(user_email, profile):
+        log_event(
+            action="PARADIGM_UPDATED",
+            payload={"email": user_email, "paradigm": paradigm_text},
+            actor=user_email
+        )
         return jsonify({"message": "Profile updated successfuly"}), 200
     else:
         return jsonify({"error": "Failed to save profile"}), 500
@@ -913,6 +1052,11 @@ def link_email_endpoint():
                 existing_keys.add(key)
     
     if save_judge_profile(primary_email, profile):
+        log_event(
+            action="EMAIL_LINKED",
+            payload={"primary_email": primary_email, "secondary_email": secondary_email},
+            actor=primary_email
+        )
         return jsonify({"message": f"Successfully linked {secondary_email} to {primary_email}", "profile": profile}), 200
     else:
         return jsonify({"error": "Failed to update profile"}), 500
@@ -1037,6 +1181,12 @@ def close_tournament_endpoint(tournament_id):
         # Mark tournament as closed
         data['is_closed'] = True
         if patched_save_tournament_with_id(data, teams, tournament_id):
+            log_event(
+                action="TOURNAMENT_CLOSED",
+                payload={"is_closed": True},
+                tournament_id=tournament_id,
+                actor=get_current_actor()
+            )
             return jsonify({
                 "message": f"Tournament closed. {updated_count} judge and {participant_updated_count} participant profiles updated.",
                 "updated_judges": updated_count,
@@ -1111,6 +1261,13 @@ def register_team_endpoint(tournament_id):
                 data['config']['num_teams'] = len(teams_objs)
 
         if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+            registered_team = existing_team if team_id is not None else new_team
+            log_event(
+                action="TEAM_REGISTERED",
+                payload={"team": asdict(registered_team)},
+                tournament_id=tournament_id,
+                actor=user_email or get_current_actor()
+            )
             return jsonify({"message": "Team registered successfully", "team_id": team_id if team_id is not None else (new_team.id if 'new_team' in locals() else 0)}), 200
         else:
             return jsonify({"error": "Failed to save tournament data"}), 500
@@ -1150,6 +1307,12 @@ def add_coach_endpoint(tournament_id):
         
     data['auth']['coaches'][email] = institution
     if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+        log_event(
+            action="COACH_ADDED",
+            payload={"email": email, "institution": institution},
+            tournament_id=tournament_id,
+            actor=get_current_actor()
+        )
         return jsonify({"message": f"Coach {email} assigned to {institution}", "coaches": data['auth']['coaches']}), 200
     return jsonify({"error": "Failed to save tournament data"}), 500
 
@@ -1165,6 +1328,12 @@ def remove_coach_endpoint(tournament_id, coach_email):
     if 'coaches' in auth_data and email in auth_data['coaches']:
         del auth_data['coaches'][email]
         if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+            log_event(
+                action="COACH_REMOVED",
+                payload={"email": email},
+                tournament_id=tournament_id,
+                actor=get_current_actor()
+            )
             return jsonify({"message": f"Coach {email} removed", "coaches": auth_data['coaches']}), 200
         return jsonify({"error": "Failed to save tournament data"}), 500
     return jsonify({"error": f"Coach {email} not found"}), 404
@@ -1203,6 +1372,12 @@ def submit_coach_request_endpoint(tournament_id):
     }
 
     if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+        log_event(
+            action="COACH_REQUESTED",
+            payload=data['auth']['coach_requests'][email],
+            tournament_id=tournament_id,
+            actor=email
+        )
         return jsonify({
             "message": f"Coach request for {institution} submitted successfully",
             "request": data['auth']['coach_requests'][email]
@@ -1242,6 +1417,12 @@ def approve_coach_request_endpoint(tournament_id, coach_email):
     auth_data['coaches'][email] = institution
 
     if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+        log_event(
+            action="COACH_APPROVED",
+            payload={"email": email, "institution": institution},
+            tournament_id=tournament_id,
+            actor=get_current_actor()
+        )
         return jsonify({
             "message": f"Coach {email} approved for {institution}",
             "coaches": auth_data['coaches'],
@@ -1263,6 +1444,12 @@ def reject_coach_request_endpoint(tournament_id, coach_email):
     if email in requests:
         del requests[email]
         if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+            log_event(
+                action="COACH_REJECTED",
+                payload={"email": email},
+                tournament_id=tournament_id,
+                actor=get_current_actor()
+            )
             return jsonify({
                 "message": f"Coach request for {email} rejected",
                 "coach_requests": requests
@@ -1325,6 +1512,12 @@ def submit_team_request_endpoint(tournament_id):
     }
 
     if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+        log_event(
+            action="TEAM_REQUESTED",
+            payload=data['team_requests'][req_id],
+            tournament_id=tournament_id,
+            actor=user_email or 'system'
+        )
         return jsonify({
             "message": f"Team registration submitted to your {institution} coach for approval",
             "request_id": req_id,
@@ -1401,6 +1594,12 @@ def approve_team_request_endpoint(tournament_id, request_id):
         data['config']['num_teams'] = len(teams_objs)
 
     if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+        log_event(
+            action="TEAM_APPROVED",
+            payload={"request_id": request_id, "team": asdict(new_team)},
+            tournament_id=tournament_id,
+            actor=user_email or get_current_actor()
+        )
         return jsonify({
             "message": f"Team '{new_team.name}' approved and registered successfully",
             "team_id": new_team.id,
@@ -1437,6 +1636,12 @@ def reject_team_request_endpoint(tournament_id, request_id):
 
     del requests[request_id]
     if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+        log_event(
+            action="TEAM_REJECTED",
+            payload={"request_id": request_id},
+            tournament_id=tournament_id,
+            actor=user_email or get_current_actor()
+        )
         return jsonify({
             "message": "Team registration request rejected",
             "team_requests": requests
@@ -1472,6 +1677,12 @@ def approve_tournament(tournament_id):
     data['approved_at'] = datetime.utcnow().isoformat()
 
     if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+        log_event(
+            action="TOURNAMENT_APPROVED",
+            payload={"status": "approved", "approved_by": email or "admin"},
+            tournament_id=tournament_id,
+            actor=email or 'system'
+        )
         return jsonify({"message": f"Tournament {tournament_id} approved successfully", "status": "approved"}), 200
     return jsonify({"error": "Failed to save tournament approval"}), 500
 
@@ -1498,7 +1709,52 @@ def reject_tournament(tournament_id):
                 os.rmdir(os.path.dirname(path))
             except OSError:
                 pass
+    log_event(
+        action="TOURNAMENT_REJECTED",
+        payload={"status": "rejected"},
+        tournament_id=tournament_id,
+        actor=email or 'system'
+    )
     return jsonify({"message": f"Tournament {tournament_id} request rejected and removed"}), 200
+
+@app.route('/api/t/<tournament_id>/events', methods=['GET'])
+@require_auth(allowed_roles=['admin'])
+def get_tournament_events_endpoint(tournament_id):
+    """Retrieve event journal for a specific tournament (Admin/Super Admin only)."""
+    events = load_events_from_storage(tournament_id)
+    return jsonify({
+        "tournament_id": tournament_id,
+        "count": len(events),
+        "events": events
+    }), 200
+
+@app.route('/api/events', methods=['GET'])
+@require_auth()
+def get_all_events_endpoint():
+    """Retrieve central platform event journal (Super Admin only)."""
+    user_info = getattr(request, 'user_info', None)
+    email = user_info.get('email', '').lower().strip() if user_info else ''
+    if not is_super_admin(email) and GOOGLE_OAUTH_CLIENT_ID:
+        return jsonify({"error": "Forbidden: Requires Super Admin privileges"}), 403
+    
+    events = load_events_from_storage()
+    
+    # Optional filtering
+    tid = request.args.get('tournament_id')
+    action = request.args.get('action')
+    if tid:
+        events = [e for e in events if e.get('tournament_id') == tid]
+    if action:
+        events = [e for e in events if e.get('action') == action]
+        
+    limit = request.args.get('limit', type=int)
+    if limit and limit > 0:
+        events = events[-limit:]
+        
+    return jsonify({
+        "count": len(events),
+        "events": events
+    }), 200
 
 
 if __name__ == '__main__':
