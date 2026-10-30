@@ -161,6 +161,35 @@ def get_profile_path(email):
             os.makedirs(p_dir)
         return os.path.join(p_dir, f"{safe_email}.json")
 
+def get_raw_profile_path(email):
+    """Get storage path for an email directly without resolving aliases."""
+    safe_email = email.lower().strip().replace('@', '_at_').replace('.', '_')
+    if BUCKET_NAME:
+        return f"profiles/{safe_email}.json"
+    else:
+        p_dir = os.path.join(LOCAL_STORAGE_DIR, 'profiles')
+        if not os.path.exists(p_dir):
+            os.makedirs(p_dir)
+        return os.path.join(p_dir, f"{safe_email}.json")
+
+def load_raw_profile(email):
+    """Load profile directly for an email without resolving aliases."""
+    try:
+        path = get_raw_profile_path(email)
+        if BUCKET_NAME:
+            client = get_storage_client()
+            bucket = client.bucket(BUCKET_NAME)
+            blob = bucket.blob(path)
+            if blob.exists():
+                return json.loads(blob.download_as_text())
+        else:
+            if os.path.exists(path):
+                with open(path, 'r') as f:
+                    return json.load(f)
+    except Exception as e:
+        logger.error(f"Error loading raw profile for {email}: {e}")
+    return None
+
 def load_judge_profile(email):
     """Load a judge's global profile (paradigm and history)."""
     try:
@@ -516,9 +545,11 @@ def manage_judge(tournament_id):
             data['next_judge_id'] = judge_id + 1
             
             if 'auth' not in data:
-                data['auth'] = {'admins': [], 'judges': {}}
+                data['auth'] = {'admins': [], 'judges': {}, 'coaches': {}}
             if 'judges' not in data['auth']:
                 data['auth']['judges'] = {}
+            if 'coaches' not in data['auth']:
+                data['auth']['coaches'] = {}
             if email:
                 data['auth']['judges'][str(judge_id)] = email
             
@@ -766,12 +797,14 @@ def reset_tournament(tournament_id):
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/judge_profile/<email>', methods=['GET'])
+@app.route('/api/profile/<email>', methods=['GET'])
 def get_judge_profile_endpoint(email):
     """Get global profile for a specific email."""
     profile = load_judge_profile(email)
     return jsonify(profile), 200
 
 @app.route('/api/judge_profile', methods=['POST'])
+@app.route('/api/profile', methods=['POST'])
 @require_auth()
 def update_judge_profile_endpoint():
     """Update paradigm in profile for the authenticated user."""
@@ -789,7 +822,9 @@ def update_judge_profile_endpoint():
         return jsonify({"message": "Profile updated successfuly"}), 200
     else:
         return jsonify({"error": "Failed to save profile"}), 500
+
 @app.route('/api/user/link_email', methods=['POST'])
+@app.route('/api/link_email', methods=['POST'])
 @require_auth()
 def link_email_endpoint():
     """Link a secondary email to the authenticated user's primary profile."""
@@ -803,26 +838,42 @@ def link_email_endpoint():
     if not secondary_email or secondary_email == primary_email:
         return jsonify({"error": "Invalid secondary email"}), 400
         
-    # 1. Update Global Aliases
     aliases = load_aliases()
     if secondary_email in aliases and aliases[secondary_email] != primary_email:
         return jsonify({"error": f"Email {secondary_email} is already linked to another account"}), 400
     
+    # 1. Load secondary profile before aliasing to merge existing records
+    secondary_profile = load_raw_profile(secondary_email)
+
+    # 2. Update Global Aliases
     aliases[secondary_email] = primary_email
     if not save_aliases(aliases):
         return jsonify({"error": "Failed to save alias mapping"}), 500
         
-    # 2. Update Primary Profile
+    # 3. Update Primary Profile
     profile = load_judge_profile(primary_email)
     if 'aliases' not in profile:
         profile['aliases'] = []
     if secondary_email not in profile['aliases']:
         profile['aliases'].append(secondary_email)
         
-    # 3. Optional: Merge existing history from secondary if it exists
-    # If there's already a profile for the secondary email that isn't just an alias, merge it.
-    secondary_path = get_profile_path(secondary_email) # Note: get_profile_path now resolves, so this is tricky.
-    # We need a way to check if a file specifically for secondary_email exists BEFORE resolving.
+    # 4. Merge existing history and paradigm from secondary if it exists
+    if secondary_profile:
+        if not profile.get('paradigm') and secondary_profile.get('paradigm'):
+            profile['paradigm'] = secondary_profile['paradigm']
+            
+        if 'history' not in profile:
+            profile['history'] = []
+            
+        existing_keys = set(
+            (h.get('tournament_id'), h.get('round_num'), h.get('match_id'), h.get('type'))
+            for h in profile['history']
+        )
+        for record in secondary_profile.get('history', []):
+            key = (record.get('tournament_id'), record.get('round_num'), record.get('match_id'), record.get('type'))
+            if key not in existing_keys:
+                profile['history'].append(record)
+                existing_keys.add(key)
     
     if save_judge_profile(primary_email, profile):
         return jsonify({"message": f"Successfully linked {secondary_email} to {primary_email}", "profile": profile}), 200
@@ -997,6 +1048,10 @@ def register_team_endpoint(tournament_id):
             if not coach_institution or institution != coach_institution:
                 return jsonify({"error": f"Unauthorized: You can only register teams for {coach_institution}"}), 403
 
+        # Validation: cannot register new teams once tournament matches have been generated
+        if team_id is None and data.get('matches') and len(data.get('matches')) > 0:
+            return jsonify({"error": "Cannot register new teams after preliminary rounds have been paired"}), 400
+
         # Add or update team
         if team_id is not None:
             # Update existing
@@ -1015,6 +1070,8 @@ def register_team_endpoint(tournament_id):
             max_id = max([t.id for t in teams_objs] + [-1])
             new_team = tm.Team(id=max_id + 1, name=team_name, institution=institution, members=members)
             teams_objs.append(new_team)
+            if 'config' in data and isinstance(data['config'], dict):
+                data['config']['num_teams'] = len(teams_objs)
 
         if patched_save_tournament_with_id(data, teams_objs, tournament_id):
             return jsonify({"message": "Team registered successfully", "team_id": team_id if team_id is not None else (new_team.id if 'new_team' in locals() else 0)}), 200
@@ -1024,6 +1081,56 @@ def register_team_endpoint(tournament_id):
     except Exception as e:
         logger.error(f"Error registering team: {e}")
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/t/<tournament_id>/coaches', methods=['GET'])
+@require_auth(allowed_roles=['admin'])
+def get_coaches_endpoint(tournament_id):
+    """Get all registered coaches and their institutions for a tournament."""
+    data, _ = patched_load_tournament_with_id(tournament_id)
+    if not data:
+        return jsonify({"error": "Tournament not found"}), 404
+    auth_data = data.get('auth', {})
+    coaches = auth_data.get('coaches', {})
+    return jsonify({"coaches": coaches}), 200
+
+@app.route('/api/t/<tournament_id>/coaches', methods=['POST'])
+@require_auth(allowed_roles=['admin'])
+def add_coach_endpoint(tournament_id):
+    """Add or update a coach's school assignment."""
+    data, teams_objs = patched_load_tournament_with_id(tournament_id)
+    if not data:
+        return jsonify({"error": "Tournament not found"}), 404
+    req = request.json or {}
+    email = req.get('email', '').lower().strip()
+    institution = req.get('institution', '').strip()
+    if not email or not institution:
+        return jsonify({"error": "Both email and institution are required"}), 400
+    
+    if 'auth' not in data:
+        data['auth'] = {'admins': [], 'judges': {}, 'coaches': {}}
+    if 'coaches' not in data['auth']:
+        data['auth']['coaches'] = {}
+        
+    data['auth']['coaches'][email] = institution
+    if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+        return jsonify({"message": f"Coach {email} assigned to {institution}", "coaches": data['auth']['coaches']}), 200
+    return jsonify({"error": "Failed to save tournament data"}), 500
+
+@app.route('/api/t/<tournament_id>/coaches/<path:coach_email>', methods=['DELETE'])
+@require_auth(allowed_roles=['admin'])
+def remove_coach_endpoint(tournament_id, coach_email):
+    """Remove a coach from a tournament."""
+    data, teams_objs = patched_load_tournament_with_id(tournament_id)
+    if not data:
+        return jsonify({"error": "Tournament not found"}), 404
+    email = coach_email.lower().strip()
+    auth_data = data.get('auth', {})
+    if 'coaches' in auth_data and email in auth_data['coaches']:
+        del auth_data['coaches'][email]
+        if patched_save_tournament_with_id(data, teams_objs, tournament_id):
+            return jsonify({"message": f"Coach {email} removed", "coaches": auth_data['coaches']}), 200
+        return jsonify({"error": "Failed to save tournament data"}), 500
+    return jsonify({"error": f"Coach {email} not found"}), 404
 
 
 if __name__ == '__main__':

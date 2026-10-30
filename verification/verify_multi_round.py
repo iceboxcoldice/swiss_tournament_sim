@@ -27,8 +27,8 @@ try:
     # Report R1 results
     print("\n--- Report R1 ---")
     with open("r1_results.txt", "w") as f:
-        f.write(f"1 {m1['match_id']} {m1['aff_id']} {m1['neg_id']} A\n")
-        f.write(f"1 {m2['match_id']} {m2['aff_id']} {m2['neg_id']} N\n")
+        f.write(f"1 {m1['match_id']} {m1['aff_id']} {m1['neg_id']} A 0\n")
+        f.write(f"1 {m2['match_id']} {m2['aff_id']} {m2['neg_id']} N 0\n")
     subprocess.run(["python3", "tournament_manager.py", "report", "1", "--file", "r1_results.txt"], check=True)
     
     print("\n--- Pair R2 ---")
@@ -40,7 +40,7 @@ try:
         # R2 Match 1 (Valid)
         # Need to find correct IDs for R2 pairings, but let's just use R1 correction for now
         # R1 Match 1 Correction: Change A to N
-        f.write(f"1 {m1['match_id']} {m1['aff_id']} {m1['neg_id']} N\n")
+        f.write(f"1 {m1['match_id']} {m1['aff_id']} {m1['neg_id']} N 0\n")
         
     # Run report for Round 2 with force
     subprocess.run(["python3", "tournament_manager.py", "report", "2", "--file", "multi_round.txt", "--force"], check=True)
@@ -60,7 +60,7 @@ try:
     # Verify R1 result NOT updated without force
     print("\n--- Testing Multi-Round Update (No Force) ---")
     with open("multi_round_fail.txt", "w") as f:
-        f.write(f"1 {m1['match_id']} {m1['aff_id']} {m1['neg_id']} A\n") # Try to change back
+        f.write(f"1 {m1['match_id']} {m1['aff_id']} {m1['neg_id']} A 0\n") # Try to change back
         
     result = subprocess.run(["python3", "tournament_manager.py", "report", "2", "--file", "multi_round_fail.txt"], capture_output=True, text=True)
     

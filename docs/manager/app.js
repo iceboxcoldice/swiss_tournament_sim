@@ -641,6 +641,8 @@ function renderTabs() {
 
     mainTabs.innerHTML = '';
 
+    const role = getUserRole();
+
     // Create Entries tab
     const entriesBtn = document.createElement('button');
     entriesBtn.className = 'tab-btn';
@@ -654,6 +656,15 @@ function renderTabs() {
     judgesBtn.textContent = 'Judges';
     judgesBtn.onclick = showJudges;
     mainTabs.appendChild(judgesBtn);
+
+    // Create Coaches tab (Admin only)
+    if (role === 'admin') {
+        const coachesBtn = document.createElement('button');
+        coachesBtn.className = 'tab-btn';
+        coachesBtn.textContent = 'Coaches';
+        coachesBtn.onclick = showCoaches;
+        mainTabs.appendChild(coachesBtn);
+    }
 
     // Create round tabs
     const { num_prelim_rounds, num_elim_rounds } = tournament.data.config;
@@ -671,7 +682,6 @@ function renderTabs() {
     }
 
     // Create [+] button (Admin Only)
-    const role = getUserRole();
     if (role === 'admin' && !tournament.data.is_closed) {
         const newRoundBtn = document.createElement('button');
         newRoundBtn.className = 'tab-btn new-round-btn';
@@ -698,6 +708,9 @@ function renderTabs() {
             return;
         } else if (hash === 'judges') {
             showJudges();
+            return;
+        } else if (hash === 'coaches') {
+            showCoaches();
             return;
         } else if (hash.startsWith('round')) {
             const roundNum = parseInt(hash.replace('round', ''));
@@ -729,6 +742,9 @@ function renderTabs() {
     } else if (activeTab === 'judges') {
         showJudges();
         return;
+    } else if (activeTab === 'coaches') {
+        showCoaches();
+        return;
     }
 
     // Default behavior (initial load or invalid state) - show Entries if nothing else is active
@@ -738,6 +754,8 @@ function renderTabs() {
         showStandings();
     } else if (activeTab === 'judges') {
         showJudges();
+    } else if (activeTab === 'coaches') {
+        showCoaches();
     } else if (activeTab.startsWith('round')) {
         const rNum = parseInt(activeTab.replace('round', ''));
         if (rNum <= maxPairedRound) {
@@ -1330,6 +1348,106 @@ function showJudges() {
             </form>
         </div>
         ` : ''}
+    `;
+}
+
+// Show Coaches (Admin Only)
+async function showCoaches() {
+    activeTab = 'coaches';
+    window.location.hash = 'coaches';
+
+    // Add to navigation history
+    if (navigationHistory[navigationHistory.length - 1] !== activeTab) {
+        navigationHistory.push(activeTab);
+    }
+
+    // Update active state
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        if (btn.textContent === 'Coaches') {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+
+    const role = getUserRole();
+    if (role !== 'admin') {
+        tabContent.innerHTML = '<div class="card"><p class="text-muted">Coach management is restricted to tournament administrators.</p></div>';
+        return;
+    }
+
+    let coaches = {};
+    try {
+        coaches = await tournament.fetchCoaches();
+    } catch (e) {
+        coaches = (tournament.data && tournament.data.auth && tournament.data.auth.coaches) || {};
+    }
+
+    const coachEmails = Object.keys(coaches || {}).sort();
+
+    tabContent.innerHTML = `
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h3>School Coaches</h3>
+                ${!tournament.data.is_closed ? '<button class="btn btn-primary" onclick="showAddCoachForm()">+ Add Coach</button>' : ''}
+            </div>
+            <p class="text-muted">Total Coaches: ${coachEmails.length}</p>
+            
+            ${coachEmails.length === 0 ? `
+                <p class="text-muted" style="text-align: center; padding: 2rem;">
+                    No coaches registered yet. Click "Add Coach" to grant school coaches permission to register and edit their school's teams.
+                </p>
+            ` : `
+                <table class="standings-table">
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>Institution</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${coachEmails.map(email => `
+                            <tr>
+                                <td>
+                                    <a href="#" onclick="showUserProfile('${email.replace(/'/g, "\\'")}', '${email.replace(/'/g, "\\'")}', '${(coaches[email] || '').replace(/'/g, "\\'")}'); return false;" class="team-link">
+                                        <strong style="font-family: monospace;">${email}</strong>
+                                    </a>
+                                </td>
+                                <td>${coaches[email] || '—'}</td>
+                                <td>
+                                    <button 
+                                        class="btn btn-sm btn-danger" 
+                                        onclick="deleteCoach('${email.replace(/'/g, "\\'")}')"
+                                    >
+                                        Delete
+                                    </button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `}
+        </div>
+
+        <!-- Add Coach Form (hidden by default) -->
+        <div id="addCoachForm" class="card hidden" style="margin-top: 1rem;">
+            <h4>Add School Coach</h4>
+            <form onsubmit="submitAddCoach(event)">
+                <div class="form-group">
+                    <label for="coachEmail">Coach Email *</label>
+                    <input type="email" id="coachEmail" required placeholder="e.g. coach@school.edu">
+                </div>
+                <div class="form-group">
+                    <label for="coachInstitution">Institution *</label>
+                    <input type="text" id="coachInstitution" required placeholder="e.g. Dartmouth">
+                </div>
+                <div style="display: flex; gap: 1rem;">
+                    <button type="submit" class="btn btn-primary">Add Coach</button>
+                    <button type="button" class="btn btn-secondary" onclick="hideAddCoachForm()">Cancel</button>
+                </div>
+            </form>
+        </div>
     `;
 }
 
@@ -2221,6 +2339,56 @@ window.deleteJudge = function (judgeId) {
                 await tournament.removeJudge(judgeId);
                 showJudges(); // Refresh the view
                 showNotification('Success', `Judge "${judge.name}" deleted successfully!`);
+            } catch (error) {
+                showNotification('Error', error.message);
+            }
+        }
+    );
+};
+
+// Coach Management Functions
+window.showAddCoachForm = function () {
+    const form = document.getElementById('addCoachForm');
+    if (form) {
+        form.classList.remove('hidden');
+        document.getElementById('coachEmail').focus();
+    }
+};
+
+window.hideAddCoachForm = function () {
+    const form = document.getElementById('addCoachForm');
+    if (form) {
+        form.classList.add('hidden');
+        document.getElementById('coachEmail').value = '';
+        document.getElementById('coachInstitution').value = '';
+    }
+};
+
+window.submitAddCoach = async function (event) {
+    event.preventDefault();
+
+    const email = document.getElementById('coachEmail').value.trim();
+    const institution = document.getElementById('coachInstitution').value.trim();
+
+    try {
+        await tournament.addCoach(email, institution);
+        hideAddCoachForm();
+        await showCoaches();
+        showNotification('Success', `Coach "${email}" added for ${institution}!`);
+    } catch (error) {
+        showNotification('Error', error.message);
+    }
+};
+
+window.deleteCoach = function (email) {
+    showConfirm(
+        'Delete Coach',
+        `Are you sure you want to remove coach "${email}"?`,
+        async () => {
+            try {
+                await tournament.removeCoach(email);
+                await showCoaches();
+                showNotification('Success', `Coach "${email}" removed successfully!`);
             } catch (error) {
                 showNotification('Error', error.message);
             }

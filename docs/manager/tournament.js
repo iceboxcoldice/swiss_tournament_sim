@@ -208,6 +208,16 @@ class TournamentManager {
         localStorage.setItem('tournamentData', JSON.stringify(this.data));
     }
 
+    // Check consistency between JSON data and redundant file content
+    checkConsistency() {
+        if (this.data) {
+            if (!this.data.pairing_file_content) this.data.pairing_file_content = this.generatePairingFileContent();
+            if (!this.data.result_file_content) this.data.result_file_content = this.generateResultFileContent();
+            this.validatePairingRedundancy(this.data.matches, this.data.pairing_file_content);
+            this.validateResultRedundancy(this.data.matches, this.data.result_file_content);
+        }
+    }
+
     reconstructObjects() {
         if (!this.data) return;
 
@@ -596,6 +606,75 @@ class TournamentManager {
         this.data.is_closed = true;
         this.saveToStorage();
         return result;
+    }
+
+    // Fetch all coaches for current tournament
+    async fetchCoaches() {
+        if (!this.backendUrl || !this.tournamentId) {
+            return (this.data && this.data.auth && this.data.auth.coaches) ? this.data.auth.coaches : {};
+        }
+        try {
+            const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/coaches`, {
+                headers: this.getAuthHeaders()
+            });
+            if (response.ok) {
+                const res = await response.json();
+                if (this.data) {
+                    if (!this.data.auth) this.data.auth = { admins: [], judges: {}, coaches: {} };
+                    this.data.auth.coaches = res.coaches || {};
+                    this.saveToStorage();
+                }
+                return res.coaches || {};
+            }
+        } catch (e) {
+            console.error("Failed to fetch coaches from backend:", e);
+        }
+        return (this.data && this.data.auth && this.data.auth.coaches) ? this.data.auth.coaches : {};
+    }
+
+    // Add or update a coach
+    async addCoach(email, institution) {
+        email = email.toLowerCase().trim();
+        institution = institution.trim();
+        if (!this.data) throw new Error("No active tournament");
+        if (!this.data.auth) this.data.auth = { admins: [], judges: {}, coaches: {} };
+        if (!this.data.auth.coaches) this.data.auth.coaches = {};
+        
+        this.data.auth.coaches[email] = institution;
+        this.saveToStorage();
+
+        if (this.backendUrl && this.tournamentId) {
+            const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/coaches`, {
+                method: 'POST',
+                headers: this.getAuthHeaders(),
+                body: JSON.stringify({ email, institution })
+            });
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Failed to add coach');
+            }
+        }
+        return this.data.auth.coaches;
+    }
+
+    // Remove a coach
+    async removeCoach(email) {
+        email = email.toLowerCase().trim();
+        if (this.data && this.data.auth && this.data.auth.coaches) {
+            delete this.data.auth.coaches[email];
+            this.saveToStorage();
+        }
+
+        if (this.backendUrl && this.tournamentId) {
+            const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/coaches/${encodeURIComponent(email)}`, {
+                method: 'DELETE',
+                headers: this.getAuthHeaders()
+            });
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Failed to remove coach');
+            }
+        }
     }
 
     // Assign a judge to a match

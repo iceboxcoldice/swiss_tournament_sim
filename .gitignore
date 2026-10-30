@@ -1,3 +1,10 @@
 __pycache__/
 .DS_Store
 *.pyc
+local_storage/
+*.log
+r1_results*.txt
+r2_results*.txt
+*_errors.txt
+exported_results*.txt
+multi_round*.txt

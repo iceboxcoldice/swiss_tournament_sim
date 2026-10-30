@@ -52,15 +52,15 @@ def _reconstruct_teams(data):
         # Convert list back to set for opponents if needed, but Team class uses set
         # We need to handle the conversion carefully
         t = Team(id=t_data['id'], true_rank=t_data.get('true_rank', 0), name=t_data.get('name', ''))
-        t.score = t_data['score']
-        t.buchholz = t_data['buchholz']
-        t.wins = t_data['wins']
-        t.aff_count = t_data['aff_count']
-        t.neg_count = t_data['neg_count']
-        t.last_side = t_data['last_side']
-        t.side_history = t_data['side_history']
-        t.history = t_data['history']
-        t.opponent_history = t_data['opponent_history']
+        t.score = t_data.get('score', 0.0)
+        t.buchholz = t_data.get('buchholz', 0.0)
+        t.wins = t_data.get('wins', 0)
+        t.aff_count = t_data.get('aff_count', 0)
+        t.neg_count = t_data.get('neg_count', 0)
+        t.last_side = t_data.get('last_side')
+        t.side_history = t_data.get('side_history', [])
+        t.history = t_data.get('history', [])
+        t.opponent_history = t_data.get('opponent_history', [])
         t.break_seed = t_data.get('break_seed')
         t.members = t_data.get('members', [])
         t.institution = t_data.get('institution')
