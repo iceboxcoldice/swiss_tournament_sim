@@ -464,9 +464,6 @@ if (saveBackendBtn) {
             backendConfigModal.classList.add('hidden');
             initUI();
         }
-            backendConfigModal.classList.add('hidden');
-            initUI();
-        }
     });
 }
 
