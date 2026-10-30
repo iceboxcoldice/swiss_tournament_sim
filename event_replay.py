@@ -339,6 +339,50 @@ class ReplayEngine:
                     del data["auth"]["judges"][str(jid)]
                 self._save_t(tid, data)
 
+        elif action == "JUDGE_REQUESTED":
+            data = self._load_t(tid)
+            if data:
+                if "auth" not in data:
+                    data["auth"] = {"admins": [], "judges": {}, "coaches": {}, "coach_requests": {}, "judge_requests": {}}
+                if "judge_requests" not in data["auth"]:
+                    data["auth"]["judge_requests"] = {}
+                email = p.get("email", actor).lower()
+                data["auth"]["judge_requests"][email] = {
+                    "email": email,
+                    "name": p.get("name", actor),
+                    "institution": p.get("institution", "Tournament Hire"),
+                    "paradigm": p.get("paradigm", ""),
+                    "requested_at": ts
+                }
+                self._save_t(tid, data)
+
+        elif action == "JUDGE_APPROVED":
+            data = self._load_t(tid)
+            if data:
+                judge = p.get("judge", {})
+                email = p.get("email", "").lower()
+                data.setdefault("judges", []).append(judge)
+                data["next_judge_id"] = max([j.get("id", 0) for j in data["judges"]], default=0) + 1
+                if "auth" not in data:
+                    data["auth"] = {"admins": [], "judges": {}, "coaches": {}, "coach_requests": {}, "judge_requests": {}}
+                if "judges" not in data["auth"]:
+                    data["auth"]["judges"] = {}
+                if email and judge.get("id") is not None:
+                    data["auth"]["judges"][str(judge["id"])] = email
+                if "judge_requests" in data["auth"] and email in data["auth"]["judge_requests"]:
+                    del data["auth"]["judge_requests"][email]
+                if judge.get("paradigm"):
+                    data.setdefault("paradigms", {})[str(judge["id"])] = judge["paradigm"]
+                self._save_t(tid, data)
+
+        elif action == "JUDGE_REJECTED":
+            data = self._load_t(tid)
+            if data:
+                email = p.get("email", "").lower()
+                if "auth" in data and "judge_requests" in data["auth"] and email in data["auth"]["judge_requests"]:
+                    del data["auth"]["judge_requests"][email]
+                self._save_t(tid, data)
+
         elif action == "JUDGE_ASSIGNED":
             data = self._load_t(tid)
             if data:
@@ -534,6 +578,7 @@ def validate_event_rules(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "current_round": 0,
                 "matches": set(),
                 "judges": set(),
+                "judge_requests": set(),
                 "coach_requests": set(),
                 "coaches": set(),
                 "team_requests": set(),
@@ -669,6 +714,22 @@ def validate_event_rules(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         elif action == "JUDGE_REMOVED":
             jid = p.get("judge_id")
             st["judges"].discard(jid)
+
+        elif action == "JUDGE_REQUESTED":
+            email = p.get("email", actor).lower()
+            st.setdefault("judge_requests", set()).add(email)
+
+        elif action == "JUDGE_APPROVED":
+            judge = p.get("judge", {})
+            jid = judge.get("id")
+            if jid is not None:
+                st["judges"].add(jid)
+            email = p.get("email", "").lower()
+            st.setdefault("judge_requests", set()).discard(email)
+
+        elif action == "JUDGE_REJECTED":
+            email = p.get("email", "").lower()
+            st.setdefault("judge_requests", set()).discard(email)
 
         elif action == "JUDGE_ASSIGNED":
             mid = p.get("match_id")

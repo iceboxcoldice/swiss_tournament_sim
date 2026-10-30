@@ -832,6 +832,121 @@ class TournamentManager {
         }
     }
 
+    // Request judge access (Volunteer / Self-Registration)
+    async requestJudgeAccess(institution = 'Tournament Hire', paradigm = '') {
+        institution = (institution || '').trim() || 'Tournament Hire';
+        paradigm = (paradigm || '').trim();
+
+        if (!this.backendUrl || !this.tournamentId) {
+            // Local fallback
+            if (!this.data.auth) this.data.auth = { admins: [], judges: {}, coaches: {}, coach_requests: {}, judge_requests: {} };
+            if (!this.data.auth.judge_requests) this.data.auth.judge_requests = {};
+            this.data.auth.judge_requests['local_judge'] = { email: 'local_judge', institution, paradigm, requested_at: new Date().toISOString() };
+            this.saveToStorage();
+            return { message: 'Judge application submitted' };
+        }
+
+        const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/judge_requests`, {
+            method: 'POST',
+            headers: this.getAuthHeaders(),
+            body: JSON.stringify({ institution, paradigm })
+        });
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || 'Failed to submit judge application');
+        }
+        return await response.json();
+    }
+
+    // Fetch pending judge requests (Admin only)
+    async fetchJudgeRequests() {
+        if (!this.backendUrl || !this.tournamentId) {
+            return (this.data && this.data.auth && this.data.auth.judge_requests) || {};
+        }
+        try {
+            const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/judge_requests`, {
+                headers: this.getAuthHeaders()
+            });
+            if (response.ok) {
+                const res = await response.json();
+                if (this.data) {
+                    if (!this.data.auth) this.data.auth = { admins: [], judges: {}, coaches: {}, coach_requests: {}, judge_requests: {} };
+                    this.data.auth.judge_requests = res.judge_requests || {};
+                    this.saveToStorage();
+                }
+                return res.judge_requests || {};
+            }
+        } catch (e) {
+            console.error("Failed to fetch judge requests:", e);
+        }
+        return (this.data && this.data.auth && this.data.auth.judge_requests) || {};
+    }
+
+    // Approve a judge request (Admin only)
+    async approveJudgeRequest(email) {
+        email = email.toLowerCase().trim();
+        if (this.backendUrl && this.tournamentId) {
+            const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/judge_requests/${encodeURIComponent(email)}/approve`, {
+                method: 'POST',
+                headers: this.getAuthHeaders()
+            });
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || 'Failed to approve judge application');
+            }
+            const res = await response.json();
+            if (this.data) {
+                if (res.judge) {
+                    if (!this.data.judges) this.data.judges = [];
+                    this.data.judges.push(res.judge);
+                    this.reconstructObjects();
+                }
+                if (this.data.auth) {
+                    this.data.auth.judge_requests = res.judge_requests || {};
+                }
+                this.saveToStorage();
+            }
+            return res;
+        } else {
+            // Local mode
+            if (this.data) {
+                const reqs = (this.data.auth && this.data.auth.judge_requests) || {};
+                const req = reqs[email] || {};
+                this.addJudge(req.name || email, req.institution || 'Tournament Hire', email);
+                delete reqs[email];
+                this.saveToStorage();
+            }
+            return { success: true };
+        }
+    }
+
+    // Reject a judge request (Admin only)
+    async rejectJudgeRequest(email) {
+        email = email.toLowerCase().trim();
+        if (this.backendUrl && this.tournamentId) {
+            const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/judge_requests/${encodeURIComponent(email)}/reject`, {
+                method: 'POST',
+                headers: this.getAuthHeaders()
+            });
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || 'Failed to reject judge application');
+            }
+            const res = await response.json();
+            if (this.data && this.data.auth) {
+                this.data.auth.judge_requests = res.judge_requests || {};
+                this.saveToStorage();
+            }
+            return res;
+        } else {
+            if (this.data && this.data.auth && this.data.auth.judge_requests) {
+                delete this.data.auth.judge_requests[email];
+                this.saveToStorage();
+            }
+            return { success: true };
+        }
+    }
+
     // Submit team registration request for coach approval
     async submitTeamRequest(teamData) {
         if (!this.backendUrl || !this.tournamentId) {

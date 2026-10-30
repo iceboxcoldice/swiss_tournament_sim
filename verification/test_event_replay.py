@@ -507,5 +507,91 @@ class TestEventReplay(unittest.TestCase):
         report = event_replay.verify_storage_consistency(self.test_dir, tid)
         self.assertTrue(report['is_consistent'], f"Consistency report failed: {report}")
 
+    def test_judge_self_registration_and_approval(self):
+        """Test the volunteer judge self-registration, admin approval, rejection, and deterministic replay."""
+        tid = "t-judge-registration"
+        admin_email = "coldice@gmail.com"
+        applicant_email = "judge.volunteer@debate.org"
+        reject_email = "judge.reject@debate.org"
+
+        # 1. Initialize tournament
+        res = self.app.post(
+            f'/api/t/{tid}/init',
+            data=json.dumps({"num_teams": 0, "rounds": 2}),
+            content_type='application/json',
+            headers={'X-User-Email': admin_email}
+        )
+        self.assertEqual(res.status_code, 200)
+
+        # 2. Prospective judge submits application
+        res_apply = self.app.post(
+            f'/api/t/{tid}/judge_requests',
+            data=json.dumps({
+                "institution": "Northwestern University",
+                "paradigm": "Tabula rasa. Tech over truth. Speed is completely fine."
+            }),
+            content_type='application/json',
+            headers={'X-User-Email': applicant_email}
+        )
+        self.assertEqual(res_apply.status_code, 200)
+        self.assertIn("Judge application submitted successfully", res_apply.get_json()['message'])
+
+        # 3. Second prospective judge submits application
+        res_apply2 = self.app.post(
+            f'/api/t/{tid}/judge_requests',
+            data=json.dumps({
+                "institution": "Harvard Hire",
+                "paradigm": "Prefers slow delivery."
+            }),
+            content_type='application/json',
+            headers={'X-User-Email': reject_email}
+        )
+        self.assertEqual(res_apply2.status_code, 200)
+
+        # 4. Admin lists pending judge applications
+        res_list = self.app.get(
+            f'/api/t/{tid}/judge_requests',
+            headers={'X-User-Email': admin_email}
+        )
+        self.assertEqual(res_list.status_code, 200)
+        pending = res_list.get_json()['judge_requests']
+        self.assertIn(applicant_email, pending)
+        self.assertIn(reject_email, pending)
+        self.assertEqual(pending[applicant_email]['institution'], "Northwestern University")
+
+        # 5. Admin declines the second application
+        res_reject = self.app.post(
+            f'/api/t/{tid}/judge_requests/{reject_email}/reject',
+            headers={'X-User-Email': admin_email}
+        )
+        self.assertEqual(res_reject.status_code, 200)
+        self.assertNotIn(reject_email, res_reject.get_json()['judge_requests'])
+
+        # 6. Admin approves the first applicant
+        res_approve = self.app.post(
+            f'/api/t/{tid}/judge_requests/{applicant_email}/approve',
+            headers={'X-User-Email': admin_email}
+        )
+        self.assertEqual(res_approve.status_code, 200)
+        approved_judge = res_approve.get_json()['judge']
+        self.assertEqual(approved_judge['name'], 'judge.volunteer')
+        self.assertEqual(approved_judge['email'], applicant_email)
+        self.assertEqual(approved_judge['institution'], "Northwestern University")
+        self.assertEqual(approved_judge['id'], 1)
+
+        # 7. Verify live tournament state
+        res_data = self.app.get(f'/api/t/{tid}/data')
+        self.assertEqual(res_data.status_code, 200)
+        t_data = res_data.get_json()
+        self.assertEqual(len(t_data['judges']), 1)
+        self.assertEqual(t_data['judges'][0]['email'], applicant_email)
+        self.assertEqual(t_data['auth']['judges']["1"], applicant_email)
+        self.assertEqual(t_data.get('paradigms', {}).get("1"), "Tabula rasa. Tech over truth. Speed is completely fine.")
+        self.assertNotIn(applicant_email, t_data['auth'].get('judge_requests', {}))
+
+        # 8. Verify 100% deterministic event replay consistency
+        report = event_replay.verify_storage_consistency(self.test_dir, tid)
+        self.assertTrue(report['is_consistent'], f"Consistency report failed: {report}")
+
 if __name__ == '__main__':
     unittest.main()

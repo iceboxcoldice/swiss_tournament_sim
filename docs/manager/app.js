@@ -699,8 +699,13 @@ function updateDashboard() {
     } else if (currentUser && role === 'participant') {
         const reqs = (tournament.data.auth && tournament.data.auth.coach_requests) || {};
         const myReq = reqs[currentUser.email.toLowerCase()];
+        const judgeReqs = (tournament.data.auth && tournament.data.auth.judge_requests) || {};
+        const myJudgeReq = judgeReqs[currentUser.email.toLowerCase()];
+
         if (myReq) {
             tournamentInfo.innerHTML += ` • <span style="background: #fef3c7; color: #b45309; padding: 0.15rem 0.45rem; border-radius: 3px; font-size: 0.75rem; font-weight: 600;">Coach Request Pending (${myReq.institution})</span>`;
+        } else if (myJudgeReq) {
+            tournamentInfo.innerHTML += ` • <span style="background: #fef3c7; color: #b45309; padding: 0.15rem 0.45rem; border-radius: 3px; font-size: 0.75rem; font-weight: 600;">Judge Application Pending</span>`;
         } else if (!tournament.data.is_closed) {
             tournamentInfo.innerHTML += ` <button class="btn btn-sm btn-outline" style="margin-left: 0.5rem; padding: 0.2rem 0.5rem; font-size: 0.8rem;" onclick="promptCoachRequest()">Request Coach Access</button>`;
         }
@@ -1433,7 +1438,7 @@ window.handleStartTournament = async function () {
 };
 
 // Show Judges
-function showJudges() {
+async function showJudges() {
     activeTab = 'judges';
     window.location.hash = 'judges';
 
@@ -1451,15 +1456,98 @@ function showJudges() {
         }
     });
 
-    const judges = tournament.judges;
-
+    const judges = tournament.judges || [];
     const role = getUserRole();
+    const isAdmin = role === 'admin';
+    const isJudge = role === 'judge';
+
+    let judgeRequests = {};
+    if (isAdmin) {
+        try {
+            judgeRequests = await tournament.fetchJudgeRequests();
+        } catch (e) {
+            judgeRequests = (tournament.data && tournament.data.auth && tournament.data.auth.judge_requests) || {};
+        }
+    }
+    const judgeRequestKeys = Object.keys(judgeRequests || {}).sort();
+
+    const myJudgeReq = (currentUser && tournament.data && tournament.data.auth && tournament.data.auth.judge_requests)
+        ? tournament.data.auth.judge_requests[currentUser.email.toLowerCase()]
+        : null;
 
     tabContent.innerHTML = `
+        ${!isAdmin && myJudgeReq ? `
+        <div class="card" style="border: 1px solid #f59e0b; background: #fffdf5; margin-bottom: 1.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <span style="font-size: 1.5rem;">⏳</span>
+                <div>
+                    <h4 style="margin: 0 0 0.25rem 0; color: #b45309;">Judge Application Pending</h4>
+                    <p class="text-muted" style="margin: 0; font-size: 0.9em;">
+                        Your application to judge for <strong>${myJudgeReq.institution || 'Tournament Hire'}</strong> has been submitted and is awaiting administrator review. Once approved, you can enter ballots for assigned rounds.
+                    </p>
+                </div>
+            </div>
+        </div>
+        ` : ''}
+
+        ${!isAdmin && !isJudge && !myJudgeReq && !tournament.data.is_closed ? `
+        <div class="card" style="border: 1px dashed var(--primary); background: rgba(79, 70, 229, 0.04); margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+            <div>
+                <h4 style="margin: 0 0 0.25rem 0; color: var(--primary);">Want to judge at this tournament?</h4>
+                <p class="text-muted" style="margin: 0; font-size: 0.9em;">Volunteer or apply as a hired/school judge to hear rounds and enter debate ballots.</p>
+            </div>
+            <button class="btn btn-primary" onclick="promptJudgeRequest()">Volunteer / Apply as Judge</button>
+        </div>
+        ` : ''}
+
+        ${isAdmin && judgeRequestKeys.length > 0 ? `
+        <div class="card" style="border: 1px solid #f59e0b; background: #fffdf5; margin-bottom: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h3 style="color: #b45309; margin: 0;">⏳ Pending Judge Applications</h3>
+                <span style="background: #fef3c7; color: #b45309; padding: 0.2rem 0.6rem; border-radius: 20px; font-weight: 600; font-size: 0.85rem;">${judgeRequestKeys.length} Pending</span>
+            </div>
+            <p class="text-muted" style="margin-top: 0;">The following debaters/coaches have volunteered or applied to judge debates for this tournament:</p>
+            <table class="standings-table">
+                <thead>
+                    <tr>
+                        <th>Applicant</th>
+                        <th>Email</th>
+                        <th>Institution</th>
+                        <th>Paradigm / Philosophy</th>
+                        <th>Requested At</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${judgeRequestKeys.map(email => {
+                        const req = judgeRequests[email] || {};
+                        const formattedDate = req.requested_at ? new Date(req.requested_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+                        const paradigmSnippet = req.paradigm ? (req.paradigm.length > 40 ? req.paradigm.substring(0, 40) + '...' : req.paradigm) : '<span class="text-muted">—</span>';
+                        return `
+                            <tr>
+                                <td><strong>${req.name || '—'}</strong></td>
+                                <td style="font-family: monospace;">${email}</td>
+                                <td><span style="font-weight: 600; color: var(--primary);">${req.institution || 'Tournament Hire'}</span></td>
+                                <td>${paradigmSnippet}</td>
+                                <td class="text-muted" style="font-size: 0.85em;">${formattedDate}</td>
+                                <td>
+                                    <div style="display: flex; gap: 0.5rem;">
+                                        <button class="btn btn-sm btn-primary" onclick="handleApproveJudgeRequest('${email.replace(/'/g, "\\'")}')">Approve</button>
+                                        <button class="btn btn-sm btn-danger" onclick="handleRejectJudgeRequest('${email.replace(/'/g, "\\'")}')">Decline</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+        ` : ''}
+
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                 <h3>Judges</h3>
-                ${role === 'admin' && !tournament.data.is_closed ? '<button class="btn btn-primary" onclick="showAddJudgeForm()">+ Add Judge</button>' : ''}
+                ${isAdmin && !tournament.data.is_closed ? '<button class="btn btn-primary" onclick="showAddJudgeForm()">+ Add Judge</button>' : ''}
             </div>
             <p class="text-muted">Total Judges: ${judges.length}</p>
             
@@ -1476,7 +1564,7 @@ function showJudges() {
                             <th>Institution</th>
                             <th>Email</th>
                             <th>Matches Judged</th>
-                            ${role === 'admin' ? '<th>Actions</th>' : ''}
+                            ${isAdmin ? '<th>Actions</th>' : ''}
                         </tr>
                     </thead>
                     <tbody>
@@ -1495,7 +1583,7 @@ function showJudges() {
                                     </span>
                                 </td>
                                 <td>${judge.matches_judged.length}</td>
-                                ${role === 'admin' ? `
+                                ${isAdmin ? `
                                 <td>
                                     <button 
                                         class="btn btn-sm btn-danger" 
@@ -1513,9 +1601,7 @@ function showJudges() {
             `}
         </div>
 
-        </div>
-
-        ${role === 'admin' ? `
+        ${isAdmin ? `
         <!-- Add Judge Form (hidden by default) -->
         <div id="addJudgeForm" class="card hidden" style="margin-top: 1rem;">
             <h4>Add New Judge</h4>
@@ -2794,6 +2880,64 @@ window.handleRejectCoachRequest = function (email) {
                 await showCoaches();
             } catch (e) {
                 showNotification("Error", e.message);
+            } finally {
+                hideLoading();
+            }
+        }
+    );
+};
+
+window.promptJudgeRequest = async function () {
+    if (!currentUser) {
+        showNotification('Login Required', 'Please sign in with Google to volunteer as a judge.');
+        return;
+    }
+    const inst = prompt("Enter your school or affiliation (leave blank for 'Tournament Hire'):", "Tournament Hire");
+    if (inst === null) return;
+
+    const paradigm = prompt("Optional: Enter your judging paradigm or philosophy notes (or URL):", "");
+    if (paradigm === null) return;
+
+    showLoading("Submitting judge application...");
+    try {
+        const res = await tournament.requestJudgeAccess((inst || '').trim() || 'Tournament Hire', (paradigm || '').trim());
+        showNotification("Success", res.message || "Judge application submitted!");
+        updateDashboard();
+        await showJudges();
+    } catch (err) {
+        showNotification("Error", err.message);
+    } finally {
+        hideLoading();
+    }
+};
+
+window.handleApproveJudgeRequest = async function (email) {
+    showLoading(`Approving judge ${email}...`);
+    try {
+        const res = await tournament.approveJudgeRequest(email);
+        showNotification("Success", res.message || `Judge ${email} approved!`);
+        updateDashboard();
+        await showJudges();
+    } catch (err) {
+        showNotification("Error", err.message);
+    } finally {
+        hideLoading();
+    }
+};
+
+window.handleRejectJudgeRequest = function (email) {
+    showConfirm(
+        'Decline Judge Application',
+        `Are you sure you want to decline the judge application for "${email}"?`,
+        async () => {
+            showLoading(`Declining judge application...`);
+            try {
+                const res = await tournament.rejectJudgeRequest(email);
+                showNotification("Success", res.message || "Judge application declined.");
+                updateDashboard();
+                await showJudges();
+            } catch (err) {
+                showNotification("Error", err.message);
             } finally {
                 hideLoading();
             }
