@@ -779,11 +779,13 @@ def manage_judge(tournament_id):
                 return jsonify({"error": "Missing judge name"}), 400
                 
             judge_id = data.get('next_judge_id', 1)
+            conflicts = req_data.get('conflicts', [])
             new_judge = {
                 "id": judge_id,
                 "name": name,
                 "institution": institution,
                 "email": email,
+                "conflicts": conflicts,
                 "matches_judged": []
             }
             data['judges'].append(new_judge)
@@ -862,10 +864,20 @@ def assign_judge(tournament_id):
             if old_judge and match_id in old_judge.get('matches_judged', []):
                 old_judge.setdefault('matches_judged', []).remove(match_id)
                 
+        force = req_data.get('force', False)
         if new_judge_id is not None:
             new_judge = next((j for j in data.get('judges', []) if j.get('id') == new_judge_id), None)
             if not new_judge:
                 return jsonify({"error": f"Judge {new_judge_id} not found"}), 404
+
+            has_conflict, conflict_reason = tm.check_judge_conflict(new_judge, match, teams)
+            if has_conflict and not force:
+                return jsonify({
+                    "error": conflict_reason,
+                    "has_conflict": True,
+                    "conflict_reason": conflict_reason
+                }), 400
+
             if match_id not in new_judge.setdefault('matches_judged', []):
                 new_judge['matches_judged'].append(match_id)
                 
@@ -874,7 +886,7 @@ def assign_judge(tournament_id):
         if patched_save_tournament_with_id(data, teams, tournament_id):
             log_event(
                 action="JUDGE_ASSIGNED",
-                payload={"match_id": match_id, "judge_id": new_judge_id},
+                payload={"match_id": match_id, "judge_id": new_judge_id, "forced": force if new_judge_id else False},
                 tournament_id=tournament_id,
                 actor=get_current_actor()
             )
@@ -884,6 +896,77 @@ def assign_judge(tournament_id):
             
     except Exception as e:
         logger.error(f"Error assigning judge: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/t/<tournament_id>/auto_assign_judges', methods=['POST'])
+@require_auth(allowed_roles=['admin'])
+def auto_assign_judges_endpoint(tournament_id):
+    """Automatically assign available unconflicted judges to round matches."""
+    try:
+        req_data = request.json or {}
+        round_num = req_data.get('round_num')
+        data, teams = patched_load_tournament_with_id(tournament_id)
+        if not data:
+            return jsonify({"error": "No tournament found"}), 404
+
+        if data.get('is_closed'):
+            return jsonify({"error": "Forbidden: Tournament is closed"}), 403
+
+        assignments = tm.auto_assign_judges(data, teams, round_num)
+        
+        if patched_save_tournament_with_id(data, teams, tournament_id):
+            log_event(
+                action="JUDGES_AUTO_ASSIGNED",
+                payload={"round_num": round_num or data.get('current_round'), "assignments": assignments},
+                tournament_id=tournament_id,
+                actor=get_current_actor()
+            )
+            return jsonify({
+                "message": f"Successfully assigned {len(assignments)} judges",
+                "assignments": assignments
+            }), 200
+        else:
+            return jsonify({"error": "Failed to save judge assignments"}), 500
+
+    except Exception as e:
+        logger.error(f"Error auto-assigning judges: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/t/<tournament_id>/judge/<int:judge_id>/conflicts', methods=['GET', 'POST'])
+@require_auth(allowed_roles=['admin'])
+def manage_judge_conflicts(tournament_id, judge_id):
+    """View or update conflicts for a judge."""
+    try:
+        data, teams = patched_load_tournament_with_id(tournament_id)
+        if not data:
+            return jsonify({"error": "Tournament not found"}), 404
+
+        judge = next((j for j in data.get('judges', []) if j.get('id') == judge_id), None)
+        if not judge:
+            return jsonify({"error": f"Judge {judge_id} not found"}), 404
+
+        if request.method == 'GET':
+            return jsonify({"judge_id": judge_id, "conflicts": judge.get('conflicts', [])}), 200
+
+        if data.get('is_closed'):
+            return jsonify({"error": "Tournament is closed"}), 403
+
+        req_data = request.json or {}
+        conflicts = req_data.get('conflicts', [])
+        judge['conflicts'] = conflicts
+
+        if patched_save_tournament_with_id(data, teams, tournament_id):
+            log_event(
+                action="JUDGE_CONFLICTS_UPDATED",
+                payload={"judge_id": judge_id, "conflicts": conflicts},
+                tournament_id=tournament_id,
+                actor=get_current_actor()
+            )
+            return jsonify({"message": "Conflicts updated", "judge_id": judge_id, "conflicts": conflicts}), 200
+        return jsonify({"error": "Failed to save conflicts"}), 500
+
+    except Exception as e:
+        logger.error(f"Error managing judge conflicts: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/t/<tournament_id>/pair', methods=['POST'])

@@ -427,6 +427,32 @@ class ReplayEngine:
                         j["matches_judged"].remove(mid)
                 self._save_t(tid, data)
 
+        elif action == "JUDGES_AUTO_ASSIGNED":
+            data = self._load_t(tid)
+            if data:
+                assignments = p.get("assignments", [])
+                for a in assignments:
+                    mid = a.get("match_id")
+                    jid = a.get("judge_id")
+                    for m in data.get("matches", []):
+                        if m.get("match_id") == mid:
+                            m["judge_id"] = jid
+                    for j in data.get("judges", []):
+                        j.setdefault("matches_judged", [])
+                        if j.get("id") == jid and mid not in j["matches_judged"]:
+                            j["matches_judged"].append(mid)
+                self._save_t(tid, data)
+
+        elif action == "JUDGE_CONFLICTS_UPDATED":
+            data = self._load_t(tid)
+            if data:
+                jid = p.get("judge_id")
+                conflicts = p.get("conflicts", [])
+                for j in data.get("judges", []):
+                    if j.get("id") == jid:
+                        j["conflicts"] = conflicts
+                self._save_t(tid, data)
+
         elif action == "ROUND_PAIRED":
             data = self._load_t(tid)
             if data:
@@ -783,6 +809,35 @@ def validate_event_rules(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 violations.append({
                     "rule": "UNKNOWN_JUDGE_ASSIGNMENT",
                     "message": f"Event #{idx} assigned non-existent judge {jid} to match {mid}",
+                    "event_index": idx,
+                    "event": e
+                })
+
+        elif action == "JUDGES_AUTO_ASSIGNED":
+            for a in p.get("assignments", []):
+                mid = a.get("match_id")
+                jid = a.get("judge_id")
+                if mid and mid not in st["matches"]:
+                    violations.append({
+                        "rule": "UNKNOWN_MATCH_ASSIGNMENT",
+                        "message": f"Event #{idx} auto-assigned judge to non-existent match {mid}",
+                        "event_index": idx,
+                        "event": e
+                    })
+                if jid and jid not in st["judges"]:
+                    violations.append({
+                        "rule": "UNKNOWN_JUDGE_ASSIGNMENT",
+                        "message": f"Event #{idx} auto-assigned non-existent judge {jid}",
+                        "event_index": idx,
+                        "event": e
+                    })
+
+        elif action == "JUDGE_CONFLICTS_UPDATED":
+            jid = p.get("judge_id")
+            if jid and jid not in st["judges"]:
+                violations.append({
+                    "rule": "UNKNOWN_JUDGE_CONFLICT_UPDATE",
+                    "message": f"Event #{idx} updated conflicts for non-existent judge {jid}",
                     "event_index": idx,
                     "event": e
                 })

@@ -1025,9 +1025,12 @@ function showRound(roundNum, highlightMatchId = null) {
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <h3>${roundLabel} Pairings ${schemeBadge} ${tournament.data.is_closed ? '<span class="closed-badge" style="background:#ef4444; color:white; padding:0.2rem 0.6rem; border-radius:4px; font-size:0.8rem; margin-left:1rem;">CLOSED</span>' : ''}</h3>
                 ${role === 'admin' ? `
-                <div>
+                <div style="display:flex; gap:0.5rem; align-items:center;">
                     <button class="btn btn-secondary" onclick="exportPairings(${roundNum})" title="Export pairings as a CSV file to import into tabular software.">📥 Export CSV</button>
-                    ${!tournament.data.is_closed ? `<button class="btn btn-danger" onclick="confirmResetRound(${roundNum})" ${roundNum !== tournament.data.current_round ? 'disabled title="Only the current round can be reset."' : ''}>Reset Round</button>` : ''}
+                    ${!tournament.data.is_closed ? `
+                        <button class="btn btn-primary" onclick="triggerAutoAssignJudges(${roundNum})" title="Automatically assign available unconflicted judges to all unassigned matches in this round">⚖️ Auto-Assign Judges</button>
+                        <button class="btn btn-danger" onclick="confirmResetRound(${roundNum})" ${roundNum !== tournament.data.current_round ? 'disabled title="Only the current round can be reset."' : ''}>Reset Round</button>
+                    ` : ''}
                 </div>
                 ` : ''}
             </div>
@@ -1182,6 +1185,10 @@ function showRound(roundNum, highlightMatchId = null) {
                                                                     ${assignedJudge.name}
                                                                 </a>
                                                                 (${assignedJudge.institution})
+                                                                ${(() => {
+                                                                    const conflict = tournament.checkJudgeConflict ? tournament.checkJudgeConflict(assignedJudge.id, m.match_id) : { hasConflict: false };
+                                                                    return conflict.hasConflict ? `<span class="badge" style="background:#ef4444; color:white; font-size:0.7rem; padding:1px 4px; border-radius:3px; margin-left:4px;" title="${conflict.reason}">⚠️ CONFLICT</span>` : '';
+                                                                })()}
                                                             </span>
                                                             ${role === 'admin' && !tournament.data.is_closed ? `
                                                             <button class="btn btn-sm btn-warning" onclick="changeJudgeAssignment(${m.match_id})" title="Change Judge">Change</button>
@@ -2628,9 +2635,17 @@ async function assignJudge(matchId) {
         return;
     }
 
+    const conflict = tournament.checkJudgeConflict ? tournament.checkJudgeConflict(judgeId, matchId) : { hasConflict: false };
+    let force = false;
+    if (conflict.hasConflict) {
+        const proceed = confirm(`⚠️ Tabroom Conflict Detected:\n${conflict.reason}\n\nDo you want to force this assignment anyway?`);
+        if (!proceed) return;
+        force = true;
+    }
+
     showLoading('Assigning judge...');
     try {
-        await tournament.assignJudgeToMatch(matchId, judgeId);
+        await tournament.assignJudgeToMatch(matchId, judgeId, force);
         // Refresh the current round view
         const match = tournament.data.matches.find(m => m.match_id === matchId);
         if (match) {
@@ -3427,14 +3442,40 @@ window.assignJudge = async function (matchId) {
         return;
     }
 
+    const conflict = tournament.checkJudgeConflict ? tournament.checkJudgeConflict(judgeId, matchId) : { hasConflict: false };
+    let force = false;
+    if (conflict.hasConflict) {
+        const proceed = confirm(`⚠️ Tabroom Conflict Detected:\n${conflict.reason}\n\nDo you want to force this assignment anyway?`);
+        if (!proceed) return;
+        force = true;
+    }
+
     try {
-        await tournament.assignJudgeToMatch(matchId, judgeId);
+        await tournament.assignJudgeToMatch(matchId, judgeId, force);
         const match = tournament.data.matches.find(m => m.match_id === matchId);
         if (match) showRound(match.round_num);
         const judge = tournament.judges.find(j => j.id === judgeId);
         showNotification('Success', `Judge "${judge.name}" assigned to Match ${matchId}`);
     } catch (error) {
         showNotification('Error', error.message);
+    }
+};
+
+window.triggerAutoAssignJudges = async function(roundNum) {
+    if (!tournament) return;
+    showLoading('Auto-assigning unconflicted judges...');
+    try {
+        const assignments = await tournament.autoAssignJudges(roundNum);
+        showRound(roundNum);
+        if (assignments && assignments.length > 0) {
+            showNotification('Success', `Auto-assigned ${assignments.length} judges without conflicts!`);
+        } else {
+            showNotification('Info', 'All matches are already assigned or no unconflicted judges were available.');
+        }
+    } catch (err) {
+        showNotification('Error', err.message);
+    } finally {
+        hideLoading();
     }
 };
 window.linkSecondaryEmail = async function () {
@@ -3702,7 +3743,17 @@ function renderJudgeResults(judges, matchId, resultsDiv) {
     judges.forEach(judge => {
         const div = document.createElement('div');
         div.className = 'judge-result-item';
-        div.textContent = `${judge.name} (${judge.institution})`;
+        div.style.display = 'flex';
+        div.style.justifyContent = 'space-between';
+        div.style.alignItems = 'center';
+        
+        const conflict = tournament.checkJudgeConflict ? tournament.checkJudgeConflict(judge.id, matchId) : { hasConflict: false };
+        let conflictHtml = '';
+        if (conflict.hasConflict) {
+            conflictHtml = `<span class="badge" style="background:#ef4444; color:white; font-size:0.7rem; padding:1px 5px; border-radius:3px; margin-left:6px;" title="${conflict.reason}">⚠️ CONFLICT</span>`;
+        }
+
+        div.innerHTML = `<span>${judge.name} (${judge.institution})</span>${conflictHtml}`;
         div.dataset.judgeId = judge.id;
         div.dataset.judgeName = judge.name;
         div.onclick = function () {

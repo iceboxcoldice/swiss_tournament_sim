@@ -1249,22 +1249,102 @@ class TournamentManager {
         return await safeJson(response);
     }
 
-    // Assign a judge to a match
-    async assignJudgeToMatch(matchId, judgeId) {
+    // Check if a judge has any conflict with a match (School / Institution or Explicit)
+    checkJudgeConflict(judgeId, matchId) {
+        const match = this.data.matches.find(m => m.match_id === matchId);
+        if (!match || match.is_bye || match.neg_id === -1 || match.neg_id === null) {
+            return { hasConflict: false, reason: null };
+        }
+
+        const judge = this.judges.find(j => j.id === judgeId);
+        if (!judge) return { hasConflict: false, reason: null };
+
+        const aff = this.teams.find(t => t.id === match.aff_id);
+        const neg = this.teams.find(t => t.id === match.neg_id);
+
+        const unconflictedInstitutions = new Set([
+            '', 'tournament hire', 'hired', 'unaffiliated', 'independent', 'none', 'unknown', 'clean', 'hired judge'
+        ]);
+
+        const judgeInst = (judge.institution || '').trim().toLowerCase();
+        const judgeName = judge.name || `Judge ${judge.id}`;
+        const affInst = aff ? (aff.institution || '').trim().toLowerCase() : '';
+        const negInst = neg ? (neg.institution || '').trim().toLowerCase() : '';
+        const affName = aff ? aff.name : `Team ${match.aff_id}`;
+        const negName = neg ? neg.name : `Team ${match.neg_id}`;
+
+        // 1. School / Institution conflict
+        if (judgeInst && !unconflictedInstitutions.has(judgeInst)) {
+            if (affInst && judgeInst === affInst) {
+                return {
+                    hasConflict: true,
+                    conflictType: 'school',
+                    reason: `School conflict: ${judgeName} and Aff (${affName}) are both from ${judge.institution}`
+                };
+            }
+            if (negInst && judgeInst === negInst) {
+                return {
+                    hasConflict: true,
+                    conflictType: 'school',
+                    reason: `School conflict: ${judgeName} and Neg (${negName}) are both from ${judge.institution}`
+                };
+            }
+        }
+
+        // 2. Explicit judge conflicts
+        const judgeConflicts = judge.conflicts || [];
+        for (const c of judgeConflicts) {
+            if (typeof c === 'number') {
+                if (c === match.aff_id) return { hasConflict: true, conflictType: 'explicit', reason: `Judge conflict with Aff team ${affName}` };
+                if (c === match.neg_id) return { hasConflict: true, conflictType: 'explicit', reason: `Judge conflict with Neg team ${negName}` };
+            } else if (typeof c === 'string') {
+                const cLower = c.trim().toLowerCase();
+                if (cLower === affInst || (aff && affName.toLowerCase().includes(cLower))) {
+                    return { hasConflict: true, conflictType: 'explicit', reason: `Judge conflict with Aff: ${c}` };
+                }
+                if (cLower === negInst || (neg && negName.toLowerCase().includes(cLower))) {
+                    return { hasConflict: true, conflictType: 'explicit', reason: `Judge conflict with Neg: ${c}` };
+                }
+            }
+        }
+
+        // 3. Explicit team conflicts
+        const affConflicts = (aff && aff.conflicts) || [];
+        const negConflicts = (neg && neg.conflicts) || [];
+        if (affConflicts.includes(judgeId) || (judge.name && affConflicts.includes(judge.name)) || (judge.email && affConflicts.includes(judge.email))) {
+            return { hasConflict: true, conflictType: 'team', reason: `Aff team ${affName} has designated a conflict with ${judgeName}` };
+        }
+        if (negConflicts.includes(judgeId) || (judge.name && negConflicts.includes(judge.name)) || (judge.email && negConflicts.includes(judge.email))) {
+            return { hasConflict: true, conflictType: 'team', reason: `Neg team ${negName} has designated a conflict with ${judgeName}` };
+        }
+
+        return { hasConflict: false, reason: null };
+    }
+
+    // Assign a judge to a match (with optional conflict override)
+    async assignJudgeToMatch(matchId, judgeId, force = false) {
         const match = this.data.matches.find(m => m.match_id === matchId);
         if (!match) throw new Error(`Match ${matchId} not found`);
 
         const judge = this.judges.find(j => j.id === judgeId);
         if (!judge) throw new Error(`Judge ${judgeId} not found`);
 
+        if (!force) {
+            const conflict = this.checkJudgeConflict(judgeId, matchId);
+            if (conflict.hasConflict) {
+                throw new Error(conflict.reason);
+            }
+        }
+
         // 1. Update locally
         if (match.judge_id !== null) {
             const oldJudge = this.judges.find(j => j.id === match.judge_id);
             if (oldJudge) {
-                oldJudge.matches_judged = oldJudge.matches_judged.filter(mid => mid !== matchId);
+                oldJudge.matches_judged = (oldJudge.matches_judged || []).filter(mid => mid !== matchId);
             }
         }
         match.judge_id = judgeId;
+        judge.matches_judged = judge.matches_judged || [];
         if (!judge.matches_judged.includes(matchId)) {
             judge.matches_judged.push(matchId);
         }
@@ -1276,7 +1356,7 @@ class TournamentManager {
                 const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/assign_judge`, {
                     method: 'POST',
                     headers: this.getAuthHeaders(),
-                    body: JSON.stringify({ match_id: matchId, judge_id: judgeId })
+                    body: JSON.stringify({ match_id: matchId, judge_id: judgeId, force: force })
                 });
 
                 if (!response.ok) {
@@ -1285,6 +1365,81 @@ class TournamentManager {
                 }
             });
         }
+    }
+
+    // Auto-assign available unconflicted judges to all unassigned matches in a round
+    async autoAssignJudges(roundNum = null) {
+        const targetRound = roundNum !== null ? roundNum : (this.data.current_round || 1);
+        const matches = this.data.matches.filter(m => m.round_num === targetRound && !m.is_bye && m.neg_id !== -1);
+        const unassignedMatches = matches.filter(m => m.judge_id === null || m.judge_id === undefined);
+        if (unassignedMatches.length === 0 || this.judges.length === 0) {
+            return [];
+        }
+
+        const assignedInRound = new Set(matches.filter(m => m.judge_id !== null && m.judge_id !== undefined).map(m => m.judge_id));
+
+        // Track past seen teams by judges
+        const judgeSeenTeams = new Map();
+        for (const pm of this.data.matches) {
+            if (pm.round_num < targetRound && pm.judge_id !== null && pm.judge_id !== undefined) {
+                if (!judgeSeenTeams.has(pm.judge_id)) judgeSeenTeams.set(pm.judge_id, new Set());
+                judgeSeenTeams.get(pm.judge_id).add(pm.aff_id);
+                judgeSeenTeams.get(pm.judge_id).add(pm.neg_id);
+            }
+        }
+
+        const assignments = [];
+        for (const match of unassignedMatches) {
+            const candidates = [];
+            for (const judge of this.judges) {
+                if (assignedInRound.has(judge.id)) continue;
+
+                const conflict = this.checkJudgeConflict(judge.id, match.match_id);
+                if (conflict.hasConflict) continue;
+
+                const seen = judgeSeenTeams.get(judge.id) || new Set();
+                const repeatPenalty = (seen.has(match.aff_id) || seen.has(match.neg_id)) ? 100 : 0;
+                const workloadPenalty = (judge.matches_judged || []).length;
+                const score = repeatPenalty + workloadPenalty;
+                candidates.push({ score, judge });
+            }
+
+            if (candidates.length > 0) {
+                candidates.sort((a, b) => a.score - b.score);
+                const bestJudge = candidates[0].judge;
+
+                match.judge_id = bestJudge.id;
+                bestJudge.matches_judged = bestJudge.matches_judged || [];
+                if (!bestJudge.matches_judged.includes(match.match_id)) {
+                    bestJudge.matches_judged.push(match.match_id);
+                }
+                assignedInRound.add(bestJudge.id);
+                assignments.push({
+                    match_id: match.match_id,
+                    judge_id: bestJudge.id,
+                    judge_name: bestJudge.name
+                });
+            }
+        }
+
+        this.saveToStorage();
+
+        // Sync with backend
+        if (this.backendUrl && assignments.length > 0) {
+            this.enqueueSync(async () => {
+                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/auto_assign_judges`, {
+                    method: 'POST',
+                    headers: this.getAuthHeaders(),
+                    body: JSON.stringify({ round_num: targetRound })
+                });
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Backend auto-assignment failed');
+                }
+            });
+        }
+
+        return assignments;
     }
 
     // Unassign a judge from a match

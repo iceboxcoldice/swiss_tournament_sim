@@ -18,7 +18,7 @@ import os
 import sys
 import threading
 from dataclasses import asdict
-from typing import List, Dict, Any, Callable, Tuple
+from typing import List, Dict, Any, Callable, Tuple, Optional, Union
 
 # Import Team and pairing logic from swiss_sim
 from swiss_sim import Team, pair_round
@@ -618,6 +618,146 @@ def reinstate_team(data, teams, team_id) -> bool:
     team_map = {t.id: t for t in teams}
     recalculate_stats(data, teams, team_map)
     return True
+
+UNCONFLICTED_INSTITUTIONS = {
+    "", "tournament hire", "hired", "unaffiliated", "independent", "none", "unknown", "clean", "hired judge"
+}
+
+def check_judge_conflict(judge: Dict, match: Dict, teams: Union[List, Dict]) -> Tuple[bool, Optional[str]]:
+    """
+    Returns (has_conflict, reason).
+    Checks:
+    1. School / Institution conflict (judge institution == aff institution or neg institution)
+    2. Explicit judge conflicts (judge['conflicts'])
+    3. Explicit team conflicts (team['conflicts'])
+    """
+    if match.get('is_bye') or match.get('neg_id') == -1 or match.get('neg_id') is None:
+        return False, None
+
+    if isinstance(teams, list):
+        team_map = {getattr(t, 'id', None) if not isinstance(t, dict) else t.get('id'): t for t in teams}
+    else:
+        team_map = teams
+
+    aff = team_map.get(match.get('aff_id'))
+    neg = team_map.get(match.get('neg_id'))
+
+    def get_attr(obj, attr, default=""):
+        if obj is None:
+            return default
+        if isinstance(obj, dict):
+            return obj.get(attr, default)
+        return getattr(obj, attr, default)
+
+    aff_inst = str(get_attr(aff, 'institution', '') or '').strip().lower()
+    neg_inst = str(get_attr(neg, 'institution', '') or '').strip().lower()
+    aff_name = str(get_attr(aff, 'name', f"Team {match.get('aff_id')}") or '')
+    neg_name = str(get_attr(neg, 'name', f"Team {match.get('neg_id')}") or '')
+
+    judge_inst = str(judge.get('institution', '') or '').strip().lower()
+    judge_name = str(judge.get('name', f"Judge {judge.get('id')}") or '')
+    judge_id = judge.get('id')
+
+    # 1. School Conflict
+    if judge_inst and judge_inst not in UNCONFLICTED_INSTITUTIONS:
+        if aff_inst and judge_inst == aff_inst:
+            return True, f"School conflict: {judge_name} and Aff ({aff_name}) are both from {judge.get('institution')}"
+        if neg_inst and judge_inst == neg_inst:
+            return True, f"School conflict: {judge_name} and Neg ({neg_name}) are both from {judge.get('institution')}"
+
+    # 2. Judge explicit conflicts (team IDs, school names, debater names)
+    judge_conflicts = judge.get('conflicts') or []
+    for c in judge_conflicts:
+        if isinstance(c, int):
+            if c == match.get('aff_id'):
+                return True, f"Judge explicit conflict with Aff team {aff_name} (ID {c})"
+            if c == match.get('neg_id'):
+                return True, f"Judge explicit conflict with Neg team {neg_name} (ID {c})"
+        elif isinstance(c, str):
+            c_lower = c.strip().lower()
+            if c_lower in (aff_inst, aff_name.lower()):
+                return True, f"Judge explicit conflict with Aff: {c}"
+            if c_lower in (neg_inst, neg_name.lower()):
+                return True, f"Judge explicit conflict with Neg: {c}"
+
+    # 3. Team explicit conflicts (judge IDs, judge names, judge emails)
+    aff_conflicts = get_attr(aff, 'conflicts', []) or []
+    neg_conflicts = get_attr(neg, 'conflicts', []) or []
+    if judge_id in aff_conflicts or judge.get('name') in aff_conflicts or judge.get('email') in aff_conflicts:
+        return True, f"Aff team {aff_name} has designated a conflict with {judge_name}"
+    if judge_id in neg_conflicts or judge.get('name') in neg_conflicts or judge.get('email') in neg_conflicts:
+        return True, f"Neg team {neg_name} has designated a conflict with {judge_name}"
+
+    return False, None
+
+def auto_assign_judges(data: Dict, teams: Union[List, Dict], round_num: Optional[int] = None) -> List[Dict]:
+    """
+    Automatically assigns unconflicted judges to matches in round_num (or current_round),
+    minimizing repeat judging and balancing workload across the judge pool.
+    """
+    if round_num is None:
+        round_num = data.get('current_round', 1)
+
+    matches = [m for m in data.get('matches', []) if m.get('round_num') == round_num and not m.get('is_bye') and m.get('neg_id') != -1]
+    unassigned_matches = [m for m in matches if m.get('judge_id') is None]
+    if not unassigned_matches:
+        return []
+
+    judges = data.get('judges', [])
+    if not judges:
+        return []
+
+    # Map judges already assigned in this round
+    assigned_in_round = {m.get('judge_id') for m in matches if m.get('judge_id') is not None}
+
+    # History of which teams judges have seen in previous rounds
+    past_matches = [m for m in data.get('matches', []) if m.get('round_num', 0) < round_num and m.get('judge_id') is not None]
+    judge_seen_teams = {}
+    for pm in past_matches:
+        jid = pm.get('judge_id')
+        judge_seen_teams.setdefault(jid, set()).add(pm.get('aff_id'))
+        judge_seen_teams.setdefault(jid, set()).add(pm.get('neg_id'))
+
+    assignments = []
+    for match in unassigned_matches:
+        aff_id = match.get('aff_id')
+        neg_id = match.get('neg_id')
+
+        candidates = []
+        for judge in judges:
+            jid = judge.get('id')
+            if jid in assigned_in_round:
+                continue
+
+            has_conflict, _ = check_judge_conflict(judge, match, teams)
+            if has_conflict:
+                continue
+
+            seen = judge_seen_teams.get(jid, set())
+            repeat_penalty = 100 if (aff_id in seen or neg_id in seen) else 0
+            workload_penalty = len(judge.get('matches_judged', []))
+
+            score = repeat_penalty + workload_penalty
+            candidates.append((score, judge))
+
+        if candidates:
+            candidates.sort(key=lambda x: x[0])
+            best_judge = candidates[0][1]
+            best_jid = best_judge.get('id')
+
+            match['judge_id'] = best_jid
+            best_judge.setdefault('matches_judged', [])
+            if match['match_id'] not in best_judge['matches_judged']:
+                best_judge['matches_judged'].append(match['match_id'])
+
+            assigned_in_round.add(best_jid)
+            assignments.append({
+                "match_id": match['match_id'],
+                "judge_id": best_jid,
+                "judge_name": best_judge.get('name', f"Judge {best_jid}")
+            })
+
+    return assignments
 
 def _handle_single_match_report(args, matches) -> bool:
     try:
