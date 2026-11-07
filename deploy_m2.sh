@@ -72,6 +72,7 @@ EOF
 # 5. Tailscale Serve / HTTPS Setup & Verification
 echo "🛡️  [5/5] Checking Tailscale HTTPS configuration on ${TARGET_HOST}..."
 REMOTE_TS_DNS=$(ssh "${TARGET_HOST}" "tailscale status --json 2>/dev/null | grep -i 'DNSName' | head -n 1 | awk -F'\"' '{print \$4}' | sed 's/\.$//' || true")
+REMOTE_IP=$(ssh "${TARGET_HOST}" "tailscale ip -4 2>/dev/null || hostname -I 2>/dev/null | awk '{print \$1}' || true")
 
 SERVE_ACTIVE=false
 if [ -n "${REMOTE_TS_DNS}" ]; then
@@ -104,12 +105,14 @@ if [ "${SERVE_ACTIVE}" = "true" ]; then
 else
     echo "🔗 Direct HTTP URL:"
     echo "   http://${TARGET_HOST}:8081"
-    echo "   (or http://100.66.206.47:8081 on Tailscale)"
+    if [ -n "${REMOTE_IP}" ]; then
+        echo "   (or http://${REMOTE_IP}:8081)"
+    fi
     echo ""
     if [ -n "${REMOTE_TS_DNS}" ]; then
         echo "💡 Note for HTTPS (GitHub Pages):"
         echo "   To enable free HTTPS on Tailscale so GitHub Pages doesn't block HTTP,"
-        echo "   visit your Tailscale admin link to enable Serve on this node, then re-run this script."
+        echo "   visit your Tailscale admin console to enable Serve on this node, then re-run this script."
     fi
     echo ""
     echo "👉 In Tournament Manager (if served locally or over HTTP):"

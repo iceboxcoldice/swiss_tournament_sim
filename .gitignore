@@ -13,3 +13,6 @@ r2_results*.txt
 *_errors.txt
 exported_results*.txt
 multi_round*.txt
+.env
+.env.*
+!.env.example

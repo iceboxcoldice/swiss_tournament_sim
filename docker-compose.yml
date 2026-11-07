@@ -12,6 +12,6 @@ services:
       - PORT=8081
       - TESTING_MODE=true
       - REQUIRE_USER_APPROVAL=false
-      - SUPER_ADMIN_EMAILS=coldice@gmail.com
-      - GOOGLE_OAUTH_CLIENT_ID=1040110950776-lp97tkf0bhc36c8s3v405c46hhf0m53m.apps.googleusercontent.com
+      - SUPER_ADMIN_EMAILS=${SUPER_ADMIN_EMAILS:-}
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
     restart: unless-stopped
