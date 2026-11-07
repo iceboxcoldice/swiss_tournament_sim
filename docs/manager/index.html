@@ -196,15 +196,15 @@
     <!-- Backend Config Modal -->
     <div id="backendConfigModal" class="modal hidden">
         <div class="modal-content">
-            <h3>Cloud Backend Configuration</h3>
-            <p>Connect to a Google App Engine backend to enable cloud storage and multi-user access.</p>
+            <h3>Backend Server Configuration</h3>
+            <p>Connect to an App Engine or local Tailscale backend to enable multi-user access and sync.</p>
             <div class="form-group">
                 <label for="backendUrlInput">Backend URL:</label>
-                <input type="text" id="backendUrlInput" placeholder="https://your-project-id.appspot.com">
+                <input type="text" id="backendUrlInput" placeholder="https://m2.your-tailnet.ts.net or https://your-project.appspot.com">
             </div>
-            <div class="modal-actions" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                <button id="disconnectBackendBtn" type="button" class="btn btn-danger" style="display: none;">🔌 Disconnect (Switch to Local)</button>
-                <div style="display: flex; gap: 0.5rem; margin-left: auto;">
+            <div class="modal-actions-split">
+                <button id="disconnectBackendBtn" type="button" class="btn btn-danger" style="display: none;" title="Disconnect and switch to local storage">🔌 Disconnect</button>
+                <div style="display: flex; gap: 0.6rem; margin-left: auto;">
                     <button id="closeBackendBtn" type="button" class="btn btn-secondary">Cancel</button>
                     <button id="saveBackendBtn" type="button" class="btn btn-primary">Connect</button>
                 </div>
@@ -278,8 +278,8 @@
 
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="tournament.js?v=34"></script>
-    <script src="app.js?v=34"></script>
+    <script src="tournament.js?v=35"></script>
+    <script src="app.js?v=35"></script>
 </body>
 
 </html>
