@@ -532,7 +532,13 @@ class TournamentManager {
             pairs = this.generateElimPairings(roundNum);
         }
 
-        // Create match objects
+        // Create match objects (with Tabroom room & flight scheduling)
+        const rooms = (this.data && this.data.rooms) || (this.data && this.data.config && this.data.config.rooms) || [];
+        const isFlighted = !!(this.data && this.data.config && (this.data.config.flighted || this.data.config.num_flights > 1));
+        const debateMatchesCount = pairs.filter(p => p[1] !== null && p[1] !== undefined).length;
+        const flightSize = isFlighted ? Math.ceil(debateMatchesCount / 2) : debateMatchesCount;
+        let debateIndex = 0;
+
         const newMatches = [];
         for (const [aff, neg] of pairs) {
             if (!neg) {
@@ -546,11 +552,22 @@ class TournamentManager {
                     neg_name: "BYE",
                     result: 'A',
                     judge_id: null,
-                    is_bye: true
+                    is_bye: true,
+                    flight: 1,
+                    room: "BYE"
                 };
                 this.data.matches.push(match);
                 newMatches.push(match);
             } else {
+                let flight = 1;
+                let roomIdx = debateIndex;
+                if (isFlighted) {
+                    flight = debateIndex < flightSize ? 1 : 2;
+                    roomIdx = debateIndex < flightSize ? debateIndex : (debateIndex - flightSize);
+                }
+                const roomName = rooms.length > 0 ? rooms[roomIdx % rooms.length] : `Room ${roomIdx + 1}`;
+                debateIndex++;
+
                 const match = {
                     match_id: this.data.next_match_id++,
                     round_num: roundNum,
@@ -559,7 +576,9 @@ class TournamentManager {
                     aff_name: aff.name,
                     neg_name: neg.name,
                     result: null,
-                    judge_id: null
+                    judge_id: null,
+                    flight: flight,
+                    room: roomName
                 };
                 this.data.matches.push(match);
                 newMatches.push(match);
@@ -1376,6 +1395,9 @@ class TournamentManager {
             return [];
         }
 
+        const isElim = targetRound > (this.data.config.num_prelim_rounds || 999);
+        const panelSize = isElim ? (this.data.config.elim_panel_size || 3) : 1;
+
         const assignedInRound = new Set(matches.filter(m => m.judge_id !== null && m.judge_id !== undefined).map(m => m.judge_id));
 
         // Track past seen teams by judges
@@ -1406,18 +1428,26 @@ class TournamentManager {
 
             if (candidates.length > 0) {
                 candidates.sort((a, b) => a.score - b.score);
-                const bestJudge = candidates[0].judge;
+                const needed = Math.min(panelSize, candidates.length);
+                const selectedPanel = candidates.slice(0, needed).map(c => c.judge);
+                const selectedJids = selectedPanel.map(j => j.id);
 
-                match.judge_id = bestJudge.id;
-                bestJudge.matches_judged = bestJudge.matches_judged || [];
-                if (!bestJudge.matches_judged.includes(match.match_id)) {
-                    bestJudge.matches_judged.push(match.match_id);
+                match.panel = selectedJids;
+                match.judge_id = selectedJids[0]; // Chair judge
+
+                for (const judge of selectedPanel) {
+                    judge.matches_judged = judge.matches_judged || [];
+                    if (!judge.matches_judged.includes(match.match_id)) {
+                        judge.matches_judged.push(match.match_id);
+                    }
+                    assignedInRound.add(judge.id);
                 }
-                assignedInRound.add(bestJudge.id);
+
                 assignments.push({
                     match_id: match.match_id,
-                    judge_id: bestJudge.id,
-                    judge_name: bestJudge.name
+                    judge_id: selectedJids[0],
+                    panel: selectedJids,
+                    judge_name: selectedPanel.map(j => j.name).join(', ')
                 });
             }
         }
@@ -1440,6 +1470,39 @@ class TournamentManager {
         }
 
         return assignments;
+    }
+
+    // Assign a panel of judges to an elimination match
+    async assignPanelToMatch(matchId, panelIds) {
+        const match = this.data.matches.find(m => m.match_id === matchId);
+        if (!match) throw new Error(`Match ${matchId} not found`);
+
+        match.panel = panelIds;
+        if (panelIds.length > 0) {
+            match.judge_id = panelIds[0];
+            for (const jid of panelIds) {
+                const judge = this.judges.find(j => j.id === jid);
+                if (judge) {
+                    judge.matches_judged = judge.matches_judged || [];
+                    if (!judge.matches_judged.includes(matchId)) judge.matches_judged.push(matchId);
+                }
+            }
+        }
+        this.saveToStorage();
+
+        if (this.backendUrl) {
+            this.enqueueSync(async () => {
+                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/assign_panel`, {
+                    method: 'POST',
+                    headers: this.getAuthHeaders(),
+                    body: JSON.stringify({ match_id: matchId, panel: panelIds })
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Backend panel assignment failed');
+                }
+            });
+        }
     }
 
     // Unassign a judge from a match
@@ -2077,37 +2140,77 @@ class TournamentManager {
         }
     }
 
-    // Report result for a match
+    // Report result for a match (supports multi-judge panel voting & RFDs)
     // speakerPoints: {affPoints: [p1, p2], negPoints: [p3, p4]} (optional)
-    async reportResult(matchId, outcome, speakerPoints = null) {
+    async reportResult(matchId, outcome, speakerPoints = null, judgeId = null, rfd = '', comments = {}) {
         // Validation
         const match = this.data.matches.find(m => m.match_id === matchId);
         if (!match) throw new Error(`Match ${matchId} not found`);
-        if (match.result !== null) throw new Error(`Match ${matchId} already has a result`);
         if (outcome !== 'A' && outcome !== 'N') throw new Error(`Invalid outcome: ${outcome}`);
 
-        // 1. Update Local State Immediately
-        match.result = outcome;
+        const effectiveJudgeId = (judgeId !== null && judgeId !== undefined) ? judgeId : match.judge_id;
+
+        // Record individual judge ballot
+        if (effectiveJudgeId !== null && effectiveJudgeId !== undefined) {
+            match.ballots = match.ballots || {};
+            match.ballots[String(effectiveJudgeId)] = {
+                judge_id: effectiveJudgeId,
+                vote: outcome,
+                speaker_points: speakerPoints || {},
+                rfd: rfd || '',
+                comments: comments || {}
+            };
+        }
+
+        if (rfd) match.rfd = rfd;
+        if (comments && Object.keys(comments).length > 0) match.comments = comments;
         if (speakerPoints) {
             this.storeSpeakerPoints(matchId, speakerPoints);
         }
 
-        const judgeId = (match.judge_id !== null && match.judge_id !== undefined) ? match.judge_id : -1;
+        const panel = match.panel || [];
+        if (panel.length > 1 && effectiveJudgeId !== null && effectiveJudgeId !== undefined) {
+            // Multi-judge panel majority vote resolution
+            const votes = Object.values(match.ballots || {}).map(b => b.vote).filter(v => v === 'A' || v === 'N');
+            const affVotes = votes.filter(v => v === 'A').length;
+            const negVotes = votes.filter(v => v === 'N').length;
+            const panelSize = panel.length;
+            const majority = Math.floor(panelSize / 2) + 1;
+
+            if (affVotes >= majority) {
+                match.result = 'A';
+                match.outcome = 'A';
+            } else if (negVotes >= majority) {
+                match.result = 'N';
+                match.outcome = 'N';
+            }
+
+            if (affVotes >= majority || negVotes >= majority || votes.length >= panelSize) {
+                match.decision = `${Math.max(affVotes, negVotes)}-${Math.min(affVotes, negVotes)}`;
+            }
+        } else {
+            // Single judge match
+            match.result = outcome;
+            match.outcome = outcome;
+            match.decision = "1-0";
+        }
+
+        const logJudgeId = (match.judge_id !== null && match.judge_id !== undefined) ? match.judge_id : -1;
         let spString = "";
         const pointsToLog = speakerPoints || match.speaker_points;
 
         if (pointsToLog) {
-            const a1 = pointsToLog.affPoints[0] !== null ? pointsToLog.affPoints[0] : "null";
-            const a2 = pointsToLog.affPoints[1] !== null ? pointsToLog.affPoints[1] : "null";
-            const n1 = pointsToLog.negPoints[0] !== null ? pointsToLog.negPoints[0] : "null";
-            const n2 = pointsToLog.negPoints[1] !== null ? pointsToLog.negPoints[1] : "null";
+            const a1 = pointsToLog.affPoints && pointsToLog.affPoints[0] !== null ? pointsToLog.affPoints[0] : "null";
+            const a2 = pointsToLog.affPoints && pointsToLog.affPoints[1] !== null ? pointsToLog.affPoints[1] : "null";
+            const n1 = pointsToLog.negPoints && pointsToLog.negPoints[0] !== null ? pointsToLog.negPoints[0] : "null";
+            const n2 = pointsToLog.negPoints && pointsToLog.negPoints[1] !== null ? pointsToLog.negPoints[1] : "null";
             spString = ` ${a1} ${a2} ${n1} ${n2}`;
         }
 
         if (this.data.result_file_content === undefined || this.data.result_file_content === null) {
             this.data.result_file_content = "";
         }
-        this.data.result_file_content += `${match.round_num} ${match.match_id} ${match.aff_id} ${match.neg_id} ${outcome} ${judgeId}${spString}\n`;
+        this.data.result_file_content += `${match.round_num} ${match.match_id} ${match.aff_id} ${match.neg_id} ${outcome} ${logJudgeId}${spString}\n`;
         this.recalculateStats();
         this.saveToStorage();
 
@@ -2120,7 +2223,10 @@ class TournamentManager {
                     body: JSON.stringify({
                         match_id: matchId,
                         result: outcome,
-                        speaker_points: speakerPoints
+                        judge_id: effectiveJudgeId,
+                        speaker_points: speakerPoints,
+                        rfd: rfd,
+                        comments: comments
                     })
                 });
 

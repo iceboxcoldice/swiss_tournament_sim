@@ -1139,6 +1139,8 @@ def report_result(tournament_id):
         result = req_data.get('result') # 'A' or 'N'
         judge_id = req_data.get('judge_id')
         speaker_points = req_data.get('speaker_points') # Optional dict
+        rfd = req_data.get('rfd', '').strip() # Optional Reason for Decision
+        comments = req_data.get('comments', {}) # Optional debater comments
         
         if not match_id:
             return jsonify({"error": "Missing match_id"}), 400
@@ -1157,6 +1159,7 @@ def report_result(tournament_id):
             
         # Check specific judge assignment if user is not admin
         user_info = getattr(request, 'user_info', None)
+        effective_judge_id = judge_id
         if user_info and GOOGLE_OAUTH_CLIENT_ID:
             user_email = user_info.get('email')
             auth_data = data.get('auth', {})
@@ -1167,15 +1170,52 @@ def report_result(tournament_id):
                     if j_email == user_email:
                         my_judge_id = int(j_idx)
                         break
-                if my_judge_id is None or my_judge_id != match.get('judge_id'):
+                panel_judges = match.get('panel') or ([match.get('judge_id')] if match.get('judge_id') is not None else [])
+                if my_judge_id is None or my_judge_id not in panel_judges:
                     return jsonify({"error": "Forbidden: You are not assigned to this match"}), 403
-            
-        # Update match
-        match['result'] = result
-        if judge_id is not None:
-            match['judge_id'] = judge_id
+                effective_judge_id = my_judge_id
+
+        # Update ballot and resolve multi-judge panel decision
+        ballots = match.setdefault('ballots', {})
+        if effective_judge_id is not None:
+            ballots[str(effective_judge_id)] = {
+                "judge_id": effective_judge_id,
+                "vote": result,
+                "speaker_points": speaker_points or {},
+                "rfd": rfd,
+                "comments": comments
+            }
+        
+        if rfd:
+            match['rfd'] = rfd
+        if comments:
+            match['comments'] = comments
         if speaker_points:
             match['speaker_points'] = speaker_points
+        if effective_judge_id is not None and not match.get('judge_id'):
+            match['judge_id'] = effective_judge_id
+
+        panel = match.get('panel') or []
+        if len(panel) > 1 and effective_judge_id is not None:
+            votes = [b.get('vote') for b in ballots.values() if b.get('vote') in ('A', 'N')]
+            aff_votes = votes.count('A')
+            neg_votes = votes.count('N')
+            panel_size = len(panel)
+            majority = (panel_size // 2) + 1
+
+            if aff_votes >= majority:
+                match['result'] = 'A'
+                match['outcome'] = 'A'
+            elif neg_votes >= majority:
+                match['result'] = 'N'
+                match['outcome'] = 'N'
+            
+            if aff_votes >= majority or neg_votes >= majority or len(votes) >= panel_size:
+                match['decision'] = f"{max(aff_votes, neg_votes)}-{min(aff_votes, neg_votes)}"
+        else:
+            match['result'] = result
+            match['outcome'] = result
+            match['decision'] = "1-0"
             
         # Recalculate stats
         team_map = {t.id: t for t in teams}
@@ -1186,19 +1226,73 @@ def report_result(tournament_id):
                 action="BALLOT_REPORTED",
                 payload={
                     "match_id": match_id,
-                    "result": result,
-                    "judge_id": judge_id,
-                    "speaker_points": speaker_points
+                    "result": match['result'],
+                    "vote": result,
+                    "judge_id": effective_judge_id,
+                    "speaker_points": speaker_points,
+                    "rfd": rfd,
+                    "comments": comments,
+                    "decision": match.get('decision')
                 },
                 tournament_id=tournament_id,
                 actor=get_current_actor()
             )
-            return jsonify({"message": f"Reported result for Match {match_id}"}), 200
+            return jsonify({
+                "message": f"Reported ballot for Match {match_id}",
+                "result": match['result'],
+                "decision": match.get('decision')
+            }), 200
         else:
             return jsonify({"error": "Failed to save result"}), 500
 
     except Exception as e:
         logger.error(f"Error in report: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/t/<tournament_id>/assign_panel', methods=['POST'])
+@require_auth(allowed_roles=['admin'])
+def assign_panel_endpoint(tournament_id):
+    """Assign a multi-judge panel to a match."""
+    try:
+        req_data = request.json or {}
+        match_id = req_data.get('match_id')
+        panel = req_data.get('panel', [])
+        
+        if not match_id:
+            return jsonify({"error": "Missing match_id"}), 400
+        if not isinstance(panel, list):
+            return jsonify({"error": "Panel must be a list of judge IDs"}), 400
+
+        data, teams = patched_load_tournament_with_id(tournament_id)
+        if not data:
+            return jsonify({"error": "Tournament not found"}), 404
+
+        match = next((m for m in data['matches'] if m['match_id'] == match_id), None)
+        if not match:
+            return jsonify({"error": f"Match {match_id} not found"}), 404
+
+        match['panel'] = panel
+        if panel:
+            match['judge_id'] = panel[0]
+            for jid in panel:
+                judge = next((j for j in data.get('judges', []) if j.get('id') == jid), None)
+                if judge:
+                    judge.setdefault('matches_judged', [])
+                    if match_id not in judge['matches_judged']:
+                        judge['matches_judged'].append(match_id)
+
+        if patched_save_tournament_with_id(data, teams, tournament_id):
+            log_event(
+                action="PANEL_ASSIGNED",
+                payload={"match_id": match_id, "panel": panel},
+                tournament_id=tournament_id,
+                actor=get_current_actor()
+            )
+            return jsonify({"message": f"Panel assigned to Match {match_id}", "panel": panel}), 200
+        return jsonify({"error": "Failed to save panel assignment"}), 500
+
+    except Exception as e:
+        logger.error(f"Error assigning panel: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/t/<tournament_id>/reset', methods=['POST'])

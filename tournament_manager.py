@@ -491,7 +491,14 @@ def cmd_pair(args):
     # 2. Remove any matches for this round (if re-pairing)
     existing_matches = [m for m in existing_matches if m['round_num'] != round_num]
     
-    # 3. Add new matches
+    # 3. Add new matches (with Tabroom room & flight scheduling)
+    rooms = data.get('rooms') or data.get('config', {}).get('rooms', [])
+    num_flights = data.get('config', {}).get('num_flights', 1)
+    is_flighted = num_flights > 1 or data.get('config', {}).get('flighted', False)
+    debate_matches_count = len([p for p in pairs if p[1] is not None])
+    flight_size = ((debate_matches_count + 1) // 2) if is_flighted else debate_matches_count
+    debate_index = 0
+
     round_match_ids = []
     for i, (aff, neg) in enumerate(pairs):
         match_id = next_match_id
@@ -508,10 +515,21 @@ def cmd_pair(args):
                 "neg_name": "BYE",
                 "result": "A",
                 "judge_id": None,
-                "is_bye": True
+                "is_bye": True,
+                "flight": 1,
+                "room": "BYE"
             }
         else:
-            print(f"Match {match_id}: {aff.name} (Aff) vs {neg.name} (Neg)")
+            flight = 1
+            room_idx = debate_index
+            if is_flighted:
+                flight = 1 if debate_index < flight_size else 2
+                room_idx = debate_index if debate_index < flight_size else (debate_index - flight_size)
+            room_name = rooms[room_idx % len(rooms)] if rooms else f"Room {room_idx + 1}"
+            debate_index += 1
+
+            flight_label = f" (Flight { 'A' if flight == 1 else 'B' }, {room_name})" if is_flighted else f" ({room_name})"
+            print(f"Match {match_id}: {aff.name} (Aff) vs {neg.name} (Neg){flight_label}")
             match = {
                 "match_id": match_id,
                 "round_num": round_num,
@@ -520,7 +538,9 @@ def cmd_pair(args):
                 "aff_name": aff.name,
                 "neg_name": neg.name,
                 "result": None,
-                "judge_id": None
+                "judge_id": None,
+                "flight": flight,
+                "room": room_name
             }
         existing_matches.append(match)
         round_match_ids.append(match_id)
@@ -535,9 +555,9 @@ def cmd_pair(args):
     save_tournament(data, teams) # Lock released in save_tournament
     print(f"\nPairings saved. Use 'report {round_num}' to enter results.")
 
-def _process_match_result(round_id, match_id, aff_id, neg_id, outcome, matches, force, judge_id=None, speaker_points=None) -> Tuple[bool, str, str]:
+def _process_match_result(round_id, match_id, aff_id, neg_id, outcome, matches, force, judge_id=None, speaker_points=None, rfd=None, comments=None) -> Tuple[bool, str, str]:
     """
-    Validates and records a single match result.
+    Validates and records a single match result (supports multi-judge panel voting & RFDs).
     Returns (Success, ErrorCode, ErrorMessage).
     ErrorCode: 'OK', 'MATCH_NOT_FOUND', 'TEAM_MISMATCH', 'OUTCOME_CONFLICT', 'ROUND_MISMATCH'
     """
@@ -549,13 +569,14 @@ def _process_match_result(round_id, match_id, aff_id, neg_id, outcome, matches, 
         
     # Validate round number
     if match['round_num'] != round_id:
-        # Allow idempotent updates: if result already matches, treat as success
         winner = outcome.upper()
         if match['result'] == winner:
             if judge_id is not None:
                 match['judge_id'] = judge_id
             if speaker_points is not None:
                 match['speaker_points'] = speaker_points
+            if rfd:
+                match['rfd'] = rfd
             return True, 'OK', "Result already matches (idempotent)"
         return False, 'ROUND_MISMATCH', f"Round mismatch: Match {match_id} is in Round {match['round_num']}, expected {round_id}"
 
@@ -569,22 +590,56 @@ def _process_match_result(round_id, match_id, aff_id, neg_id, outcome, matches, 
         return False, 'TEAM_MISMATCH', f"Team ID mismatch: {' | '.join(error_parts)}"
         
     winner = outcome.upper()
-    if match['result'] is not None:
-        if match['result'] == winner:
-            if judge_id is not None:
-                match['judge_id'] = judge_id
-            if speaker_points is not None:
-                match['speaker_points'] = speaker_points
-            return True, 'OK', "Result already matches (idempotent)"
-        if not force:
-            return False, 'OUTCOME_CONFLICT', f"Outcome conflict: existing={match['result']}, new={winner}"
-            
-    match['result'] = winner
+
+    # Record individual judge ballot
     if judge_id is not None:
-        match['judge_id'] = judge_id
+        ballots = match.setdefault('ballots', {})
+        ballots[str(judge_id)] = {
+            "judge_id": judge_id,
+            "vote": winner,
+            "speaker_points": speaker_points or {},
+            "rfd": rfd or "",
+            "comments": comments or {}
+        }
+    if rfd:
+        match['rfd'] = rfd
+    if comments:
+        match['comments'] = comments
     if speaker_points is not None:
         match['speaker_points'] = speaker_points
-    return True, 'OK', ""
+    if judge_id is not None and not match.get('judge_id'):
+        match['judge_id'] = judge_id
+
+    panel = match.get('panel') or []
+    if len(panel) > 1 and judge_id is not None:
+        # Multi-judge panel majority vote resolution
+        ballots = match.get('ballots', {})
+        votes = [b.get('vote') for b in ballots.values() if b.get('vote') in ('A', 'N')]
+        aff_votes = votes.count('A')
+        neg_votes = votes.count('N')
+        panel_size = len(panel)
+        majority = (panel_size // 2) + 1
+
+        if aff_votes >= majority:
+            match['result'] = 'A'
+            match['outcome'] = 'A'
+        elif neg_votes >= majority:
+            match['result'] = 'N'
+            match['outcome'] = 'N'
+        else:
+            match['result'] = None  # Pending remaining panel votes
+
+        if aff_votes >= majority or neg_votes >= majority or len(votes) >= panel_size:
+            match['decision'] = f"{max(aff_votes, neg_votes)}-{min(aff_votes, neg_votes)}"
+    else:
+        # Single judge match
+        if match['result'] is not None and match['result'] != winner and not force:
+            return False, 'OUTCOME_CONFLICT', f"Outcome conflict: existing={match['result']}, new={winner}"
+        match['result'] = winner
+        match['outcome'] = winner
+        match['decision'] = "1-0"
+
+    return True, 'OK', "Result successfully recorded"
 
 def drop_team(data, teams, team_id) -> bool:
     """Drops a team from the tournament. Forfeits any active, unreported match."""
@@ -718,6 +773,9 @@ def auto_assign_judges(data: Dict, teams: Union[List, Dict], round_num: Optional
         judge_seen_teams.setdefault(jid, set()).add(pm.get('aff_id'))
         judge_seen_teams.setdefault(jid, set()).add(pm.get('neg_id'))
 
+    is_elim = round_num > data.get('config', {}).get('num_prelim_rounds', 999)
+    panel_size = data.get('config', {}).get('elim_panel_size', 3) if is_elim else 1
+
     assignments = []
     for match in unassigned_matches:
         aff_id = match.get('aff_id')
@@ -742,19 +800,24 @@ def auto_assign_judges(data: Dict, teams: Union[List, Dict], round_num: Optional
 
         if candidates:
             candidates.sort(key=lambda x: x[0])
-            best_judge = candidates[0][1]
-            best_jid = best_judge.get('id')
+            needed = min(panel_size, len(candidates))
+            selected_panel = [c[1] for c in candidates[:needed]]
+            selected_jids = [j['id'] for j in selected_panel]
 
-            match['judge_id'] = best_jid
-            best_judge.setdefault('matches_judged', [])
-            if match['match_id'] not in best_judge['matches_judged']:
-                best_judge['matches_judged'].append(match['match_id'])
+            match['panel'] = selected_jids
+            match['judge_id'] = selected_jids[0]  # Chair judge
 
-            assigned_in_round.add(best_jid)
+            for j in selected_panel:
+                j.setdefault('matches_judged', [])
+                if match['match_id'] not in j['matches_judged']:
+                    j['matches_judged'].append(match['match_id'])
+                assigned_in_round.add(j['id'])
+
             assignments.append({
                 "match_id": match['match_id'],
-                "judge_id": best_jid,
-                "judge_name": best_judge.get('name', f"Judge {best_jid}")
+                "judge_id": selected_jids[0],
+                "panel": selected_jids,
+                "judge_name": ", ".join(j.get('name', f"Judge {j['id']}") for j in selected_panel)
             })
 
     return assignments

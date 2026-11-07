@@ -1151,26 +1151,60 @@ function showRound(roundNum, highlightMatchId = null) {
                                 </div>
                                 
                                 <div class="match-section">
-                                    <div class="match-header">
+                                    <div class="match-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
                                         <span class="match-id">Match ${m.match_id}</span>
+                                        <div style="display:flex; gap:0.3rem;">
+                                            ${m.flight ? `<span class="badge" style="background:#0284c7; color:white; font-size:0.7rem; padding:1px 5px; border-radius:3px;">Flight ${m.flight === 1 ? 'A' : 'B'}</span>` : ''}
+                                            ${m.room ? `<span class="badge" style="background:#475569; color:white; font-size:0.7rem; padding:1px 5px; border-radius:3px;">📍 ${m.room}</span>` : ''}
+                                        </div>
                                     </div>
                                     <div class="match-content">
-                                        ${!hasResult ? (canEditMatch ? `
-                                            <div class="result-buttons">
-                                                <button class="btn btn-success" onclick="reportResult(${m.match_id}, 'A')">Aff Wins</button>
-                                                <button class="btn btn-success" onclick="reportResult(${m.match_id}, 'N')">Neg Wins</button>
-                                            </div>
-                                        ` : '<div class="result-status"><div class="result-winner">Pending</div></div>') : `
-                                            <div class="result-status">
-                                                <div class="result-winner">Winner: ${m.result === 'A' ? 'Aff' : 'Neg'}${m.is_forfeit ? ' (Forfeit)' : ''}</div>
-                                                ${canEditMatch ? `
-                                                <div class="correction-buttons">
-                                                    <button class="btn btn-sm btn-warning" onclick="correctResult(${m.match_id}, '${m.result}')" title="Switch Winner">✏</button>
-                                                    <button class="btn btn-sm btn-danger" onclick="unsubmitResult(${m.match_id})" title="Unsubmit Result">✕</button>
-                                                </div>
-                                                ` : ''}
-                                            </div>
-                                        `}
+                                        ${(() => {
+                                            const hasPanel = m.panel && m.panel.length > 1;
+                                            const decisionBadge = m.decision ? `<span class="badge" style="background:#3b82f6; color:white; font-size:0.75rem; padding:1px 5px; border-radius:3px; margin-left:4px;">${m.decision}</span>` : '';
+                                            const hasRFD = m.rfd || (m.ballots && Object.values(m.ballots).some(b => b.rfd));
+                                            
+                                            let panelHtml = '';
+                                            if (hasPanel) {
+                                                panelHtml = `
+                                                    <div class="panel-section" style="font-size:0.75rem; margin-bottom:0.4rem; padding:0.3rem 0.4rem; background:rgba(255,255,255,0.04); border-radius:4px;">
+                                                        <div style="font-weight:600; color:var(--text-muted); margin-bottom:0.2rem;">Panel (${m.panel.length} Judges):</div>
+                                                        <div style="display:flex; flex-wrap:wrap; gap:0.4rem;">
+                                                            ${m.panel.map(jid => {
+                                                                const j = tournament.judges.find(x => x.id === jid) || { name: `Judge ${jid}` };
+                                                                const b = m.ballots && m.ballots[String(jid)];
+                                                                const voteBadge = b ? `<span class="badge" style="background:#10b981; color:white; font-size:0.7rem; padding:0 3px;">${b.vote === 'A' ? 'Aff' : 'Neg'}</span>` : `<span class="badge" style="background:#6b7280; color:white; font-size:0.7rem; padding:0 3px;">Pending</span>`;
+                                                                return `<span>${j.name} ${voteBadge}</span>`;
+                                                            }).join('')}
+                                                        </div>
+                                                    </div>
+                                                `;
+                                            }
+
+                                            return `
+                                                ${panelHtml}
+                                                ${!hasResult ? (canEditMatch ? `
+                                                    <div class="result-buttons" style="display:flex; gap:0.3rem; flex-wrap:wrap;">
+                                                        <button class="btn btn-success btn-sm" onclick="reportResult(${m.match_id}, 'A')">Aff Wins</button>
+                                                        <button class="btn btn-success btn-sm" onclick="reportResult(${m.match_id}, 'N')">Neg Wins</button>
+                                                        <button class="btn btn-secondary btn-sm" onclick="openBallotModal(${m.match_id})" title="Submit Ballot with RFD and Speaker Points">📝 Ballot & RFD</button>
+                                                    </div>
+                                                ` : '<div class="result-status"><div class="result-winner">Pending</div></div>') : `
+                                                    <div class="result-status">
+                                                        <div class="result-winner">Winner: ${m.result === 'A' ? 'Aff' : 'Neg'}${m.is_forfeit ? ' (Forfeit)' : ''} ${decisionBadge}</div>
+                                                        <div style="display:flex; gap:0.3rem; align-items:center; margin-top:0.3rem;">
+                                                            ${hasRFD ? `<button class="btn btn-sm btn-info" onclick="openRFDModal(${m.match_id})" style="font-size:0.75rem; padding:2px 6px;">📝 View RFD</button>` : ''}
+                                                            ${canEditMatch ? `
+                                                            <div class="correction-buttons">
+                                                                <button class="btn btn-sm btn-warning" onclick="correctResult(${m.match_id}, '${m.result}')" title="Switch Winner">✏</button>
+                                                                <button class="btn btn-sm btn-danger" onclick="unsubmitResult(${m.match_id})" title="Unsubmit Result">✕</button>
+                                                            </div>
+                                                            ` : ''}
+                                                        </div>
+                                                    </div>
+                                                `}
+                                            `;
+                                        })()}
                                         
                                         <!-- Judge Assignment -->
                                         <div class="judge-assignment" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
@@ -3805,4 +3839,155 @@ window.handleJudgeInputKey = function (event, matchId) {
         // Trigger assignment
         assignJudge(matchId);
     }
+};
+
+window.openBallotModal = function(matchId) {
+    const match = tournament.data.matches.find(m => m.match_id === matchId);
+    if (!match) return;
+
+    const affTeam = tournament.teams.find(t => t.id === match.aff_id);
+    const negTeam = tournament.teams.find(t => t.id === match.neg_id);
+    const affName = affTeam ? affTeam.name : `Team ${match.aff_id}`;
+    const negName = negTeam ? negTeam.name : `Team ${match.neg_id}`;
+
+    let modal = document.getElementById('ballotRFDModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'ballotRFDModal';
+        modal.className = 'modal-backdrop';
+        modal.style.cssText = 'position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.7); display:flex; justify-content:center; align-items:center; z-index:10000;';
+        document.body.appendChild(modal);
+    }
+
+    modal.innerHTML = `
+        <div class="modal-card" style="background:var(--bg-card, #1e293b); color:var(--text-main, #f8fafc); padding:1.5rem; border-radius:8px; width:90%; max-width:550px; max-height:90vh; overflow-y:auto; box-shadow:0 10px 25px rgba(0,0,0,0.5); border:1px solid var(--border-color, #334155);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; border-bottom:1px solid var(--border-color, #334155); padding-bottom:0.5rem;">
+                <h3 style="margin:0;">Submit Ballot — Match ${matchId}</h3>
+                <button onclick="document.getElementById('ballotRFDModal').style.display='none'" style="background:none; border:none; color:var(--text-muted, #94a3b8); font-size:1.5rem; cursor:pointer;">&times;</button>
+            </div>
+            
+            <div style="margin-bottom:1rem; font-size:0.95rem;">
+                <strong>Affirmative:</strong> ${affName}<br>
+                <strong>Negative:</strong> ${negName}
+            </div>
+
+            <div style="margin-bottom:1rem;">
+                <label style="display:block; font-weight:600; margin-bottom:0.4rem;">Select Winner:</label>
+                <div style="display:flex; gap:1rem;">
+                    <label style="cursor:pointer;"><input type="radio" name="ballot_vote_${matchId}" value="A" checked> <strong>Affirmative</strong> (${affName})</label>
+                    <label style="cursor:pointer;"><input type="radio" name="ballot_vote_${matchId}" value="N"> <strong>Negative</strong> (${negName})</label>
+                </div>
+            </div>
+
+            <div style="margin-bottom:1rem;">
+                <label style="display:block; font-weight:600; margin-bottom:0.3rem;">Reason for Decision (RFD):</label>
+                <textarea id="ballot_rfd_${matchId}" rows="4" style="width:100%; border-radius:4px; border:1px solid var(--border-color, #475569); background:var(--bg-input, #0f172a); color:inherit; padding:0.5rem;" placeholder="Explain the decision, key arguments, and paradigm considerations...">${match.rfd || ''}</textarea>
+            </div>
+
+            <div style="margin-bottom:1rem;">
+                <label style="display:block; font-weight:600; margin-bottom:0.3rem;">Constructive Feedback for Aff (${affName}):</label>
+                <textarea id="ballot_aff_notes_${matchId}" rows="2" style="width:100%; border-radius:4px; border:1px solid var(--border-color, #475569); background:var(--bg-input, #0f172a); color:inherit; padding:0.5rem;" placeholder="Notes for Affirmative debaters...">${(match.comments && match.comments.aff) || ''}</textarea>
+            </div>
+
+            <div style="margin-bottom:1rem;">
+                <label style="display:block; font-weight:600; margin-bottom:0.3rem;">Constructive Feedback for Neg (${negName}):</label>
+                <textarea id="ballot_neg_notes_${matchId}" rows="2" style="width:100%; border-radius:4px; border:1px solid var(--border-color, #475569); background:var(--bg-input, #0f172a); color:inherit; padding:0.5rem;" placeholder="Notes for Negative debaters...">${(match.comments && match.comments.neg) || ''}</textarea>
+            </div>
+
+            <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.5rem;">
+                <button class="btn btn-secondary" onclick="document.getElementById('ballotRFDModal').style.display='none'">Cancel</button>
+                <button class="btn btn-primary" onclick="submitBallotWithRFD(${matchId})">Submit Ballot</button>
+            </div>
+        </div>
+    `;
+    modal.style.display = 'flex';
+};
+
+window.submitBallotWithRFD = async function(matchId) {
+    const radios = document.getElementsByName(`ballot_vote_${matchId}`);
+    let vote = 'A';
+    for (const r of radios) {
+        if (r.checked) { vote = r.value; break; }
+    }
+    const rfd = document.getElementById(`ballot_rfd_${matchId}`).value.trim();
+    const affNotes = document.getElementById(`ballot_aff_notes_${matchId}`).value.trim();
+    const negNotes = document.getElementById(`ballot_neg_notes_${matchId}`).value.trim();
+    const comments = { aff: affNotes, neg: negNotes };
+
+    showLoading('Submitting ballot...');
+    try {
+        await tournament.reportResult(matchId, vote, null, null, rfd, comments);
+        document.getElementById('ballotRFDModal').style.display = 'none';
+        const match = tournament.data.matches.find(m => m.match_id === matchId);
+        if (match) showRound(match.round_num);
+        showNotification('Success', `Ballot submitted with RFD for Match ${matchId}!`);
+    } catch (err) {
+        showNotification('Error', err.message);
+    } finally {
+        hideLoading();
+    }
+};
+
+window.openRFDModal = function(matchId) {
+    const match = tournament.data.matches.find(m => m.match_id === matchId);
+    if (!match) return;
+
+    const affTeam = tournament.teams.find(t => t.id === match.aff_id);
+    const negTeam = tournament.teams.find(t => t.id === match.neg_id);
+    const affName = affTeam ? affTeam.name : `Team ${match.aff_id}`;
+    const negName = negTeam ? negTeam.name : `Team ${match.neg_id}`;
+
+    let modal = document.getElementById('viewRFDModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'viewRFDModal';
+        modal.className = 'modal-backdrop';
+        modal.style.cssText = 'position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.7); display:flex; justify-content:center; align-items:center; z-index:10000;';
+        document.body.appendChild(modal);
+    }
+
+    const ballots = match.ballots || {};
+    const ballotEntries = Object.values(ballots);
+
+    let ballotsHtml = '';
+    if (ballotEntries.length > 0) {
+        ballotsHtml = ballotEntries.map((b) => {
+            const judge = tournament.judges.find(j => j.id === b.judge_id) || { name: `Judge ${b.judge_id}` };
+            return `
+                <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border-color, #334155); border-radius:6px; padding:0.8rem; margin-bottom:0.8rem;">
+                    <div style="font-weight:600; margin-bottom:0.3rem;">
+                        ${judge.name} &mdash; Voted: <span class="badge" style="background:#10b981; color:white; padding:1px 4px; font-size:0.75rem;">${b.vote === 'A' ? 'Aff' : 'Neg'}</span>
+                    </div>
+                    ${b.rfd ? `<div style="margin-bottom:0.4rem; font-size:0.9rem;"><strong>RFD:</strong> ${b.rfd}</div>` : ''}
+                    ${b.comments && b.comments.aff ? `<div style="font-size:0.85rem; color:var(--text-muted);"><strong>Aff Notes:</strong> ${b.comments.aff}</div>` : ''}
+                    ${b.comments && b.comments.neg ? `<div style="font-size:0.85rem; color:var(--text-muted);"><strong>Neg Notes:</strong> ${b.comments.neg}</div>` : ''}
+                </div>
+            `;
+        }).join('');
+    } else {
+        ballotsHtml = `
+            <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border-color, #334155); border-radius:6px; padding:0.8rem; margin-bottom:0.8rem;">
+                <div style="margin-bottom:0.4rem; font-size:0.9rem;"><strong>RFD:</strong> ${match.rfd || 'No written RFD recorded.'}</div>
+                ${match.comments && match.comments.aff ? `<div style="font-size:0.85rem; color:var(--text-muted);"><strong>Aff Notes:</strong> ${match.comments.aff}</div>` : ''}
+                ${match.comments && match.comments.neg ? `<div style="font-size:0.85rem; color:var(--text-muted);"><strong>Neg Notes:</strong> ${match.comments.neg}</div>` : ''}
+            </div>
+        `;
+    }
+
+    modal.innerHTML = `
+        <div class="modal-card" style="background:var(--bg-card, #1e293b); color:var(--text-main, #f8fafc); padding:1.5rem; border-radius:8px; width:90%; max-width:600px; max-height:85vh; overflow-y:auto; box-shadow:0 10px 25px rgba(0,0,0,0.5); border:1px solid var(--border-color, #334155);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; border-bottom:1px solid var(--border-color, #334155); padding-bottom:0.5rem;">
+                <h3 style="margin:0;">Reason for Decision & Ballots &mdash; Match ${matchId}</h3>
+                <button onclick="document.getElementById('viewRFDModal').style.display='none'" style="background:none; border:none; color:var(--text-muted, #94a3b8); font-size:1.5rem; cursor:pointer;">&times;</button>
+            </div>
+            <div style="margin-bottom:0.8rem; font-size:0.9rem;">
+                <strong>Debate:</strong> ${affName} (Aff) vs ${negName} (Neg) &bull; Winner: <strong>${match.result === 'A' ? 'Aff' : 'Neg'}</strong> ${match.decision ? `(${match.decision})` : ''}
+            </div>
+            ${ballotsHtml}
+            <div style="display:flex; justify-content:flex-end; margin-top:1rem;">
+                <button class="btn btn-secondary" onclick="document.getElementById('viewRFDModal').style.display='none'">Close</button>
+            </div>
+        </div>
+    `;
+    modal.style.display = 'flex';
 };

@@ -464,6 +464,24 @@ class ReplayEngine:
                 data["next_match_id"] = max([m.get("match_id", 0) for m in data.get("matches", [])], default=0) + 1
                 self._save_t(tid, data)
 
+        elif action == "PANEL_ASSIGNED":
+            data = self._load_t(tid)
+            if data:
+                mid = p.get("match_id")
+                panel = p.get("panel", [])
+                for m in data.get("matches", []):
+                    if m.get("match_id") == mid:
+                        m["panel"] = panel
+                        if panel:
+                            m["judge_id"] = panel[0]
+                for jid in panel:
+                    for j in data.get("judges", []):
+                        if j.get("id") == jid:
+                            j.setdefault("matches_judged", [])
+                            if mid not in j["matches_judged"]:
+                                j["matches_judged"].append(mid)
+                self._save_t(tid, data)
+
         elif action == "BALLOT_REPORTED":
             data = self._load_t(tid)
             if data:
@@ -471,14 +489,31 @@ class ReplayEngine:
                 res = p.get("result")
                 judge_id = p.get("judge_id")
                 speaker_points = p.get("speaker_points")
+                rfd = p.get("rfd")
+                comments = p.get("comments")
+                vote = p.get("vote", res)
+                decision = p.get("decision")
                 for m in data.get("matches", []):
                     if m.get("match_id") == mid:
                         m["outcome"] = res
                         m["result"] = res
                         if judge_id is not None:
                             m["judge_id"] = judge_id
+                            m.setdefault("ballots", {})[str(judge_id)] = {
+                                "judge_id": judge_id,
+                                "vote": vote,
+                                "speaker_points": speaker_points or {},
+                                "rfd": rfd,
+                                "comments": comments
+                            }
                         if speaker_points:
                             m["speaker_points"] = speaker_points
+                        if rfd:
+                            m["rfd"] = rfd
+                        if comments:
+                            m["comments"] = comments
+                        if decision:
+                            m["decision"] = decision
                 # Recalculate stats deterministically
                 try:
                     import tournament_manager as tm
