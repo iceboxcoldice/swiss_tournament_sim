@@ -16,3 +16,4 @@ multi_round*.txt
 .env
 .env.*
 !.env.example
+tailscale/

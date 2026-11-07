@@ -6,6 +6,7 @@ __pycache__
 .pytest_cache
 .DS_Store
 local_storage/
+tailscale/
 .venv/
 venv/
 env/
