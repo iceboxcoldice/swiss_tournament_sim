@@ -151,8 +151,8 @@ echo "🎉 Tabroom Backend (with Tailscale sidecar) deployed to ${TARGET_HOST}!"
 echo "========================================================================"
 
 if [ -n "${SIDECAR_IP}" ]; then
-    echo "🌐 Tailscale Node: 'tabroom'"
-    echo "   http://tabroom:8081"
+    echo "🌐 Tailscale Node: 'tabroom2'"
+    echo "   http://tabroom2:8081"
     echo "   (or http://${SIDECAR_IP}:8081)"
     if [ -n "${SIDECAR_DNS}" ]; then
         echo "   (MagicDNS: http://${SIDECAR_DNS}:8081)"
@@ -165,7 +165,7 @@ echo "   http://${TARGET_HOST}:8081"
 echo ""
 echo "👉 In Tournament Manager (⚙️ Tools ▾ -> ☁️ Cloud Backend):"
 if [ -n "${SIDECAR_IP}" ]; then
-    echo "   Enter: http://tabroom:8081  (or http://${SIDECAR_IP}:8081)"
+    echo "   Enter: http://tabroom2:8081  (or http://${SIDECAR_IP}:8081)"
 else
     echo "   Enter: http://${TARGET_HOST}:8081"
     echo "   (Note: If this is the first run, authenticate Tailscale with the URL shown above)"
