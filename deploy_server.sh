@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Deploy Script: Tabroom Backend to Remote M2 Machine
+# Deploy Script: Tabroom Backend to Remote Server
 # ==============================================================================
 set -euo pipefail
 
-TARGET_HOST="${1:-m2}"
+TARGET_HOST="${1:-${DEPLOY_HOST:-m2}}"
 REMOTE_SUBDIR="${REMOTE_DIR:-docker/swiss_tournament_sim}"
 LOCAL_REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
