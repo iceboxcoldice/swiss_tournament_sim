@@ -192,9 +192,12 @@
                 <label for="backendUrlInput">Backend URL:</label>
                 <input type="text" id="backendUrlInput" placeholder="https://your-project-id.appspot.com">
             </div>
-            <div class="modal-actions">
-                <button id="closeBackendBtn" class="btn btn-secondary">Cancel</button>
-                <button id="saveBackendBtn" class="btn btn-primary">Connect</button>
+            <div class="modal-actions" style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                <button id="disconnectBackendBtn" type="button" class="btn btn-danger" style="display: none;">🔌 Disconnect (Switch to Local)</button>
+                <div style="display: flex; gap: 0.5rem; margin-left: auto;">
+                    <button id="closeBackendBtn" type="button" class="btn btn-secondary">Cancel</button>
+                    <button id="saveBackendBtn" type="button" class="btn btn-primary">Connect</button>
+                </div>
             </div>
         </div>
     </div>
@@ -265,8 +268,8 @@
 
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="tournament.js?v=30"></script>
-    <script src="app.js?v=30"></script>
+    <script src="tournament.js?v=31"></script>
+    <script src="app.js?v=31"></script>
 </body>
 
 </html>

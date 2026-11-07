@@ -132,7 +132,11 @@ class TournamentManager {
      * Static hosts like GitHub Pages (*.github.io) or file:// are never treated as backend servers.
      */
     getEffectiveBackendUrl() {
+        if (this.backendUrl === 'local') return null;
         if (this.backendUrl) return this.backendUrl;
+        if (typeof localStorage !== 'undefined' && localStorage.getItem('backendUrl') === 'local') {
+            return null;
+        }
         if (typeof window !== 'undefined' && window.location.origin) {
             const hostname = window.location.hostname || '';
             const isStaticHost = hostname.endsWith('github.io') || window.location.protocol === 'file:';
@@ -143,8 +147,19 @@ class TournamentManager {
         return null;
     }
 
+    disconnectBackend() {
+        this.backendUrl = null;
+        if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('backendUrl', 'local');
+        }
+    }
+
     setBackendUrl(url) {
-        if (url && typeof url === 'string') {
+        if (!url || url === 'local') {
+            this.disconnectBackend();
+            return;
+        }
+        if (typeof url === 'string') {
             url = url.trim();
             if (!url.startsWith('http://') && !url.startsWith('https://')) {
                 url = 'https://' + url;
@@ -155,10 +170,8 @@ class TournamentManager {
             url = url.replace(/\/+$/, '');
         }
         this.backendUrl = url;
-        if (url) {
+        if (typeof localStorage !== 'undefined') {
             localStorage.setItem('backendUrl', url);
-        } else {
-            localStorage.removeItem('backendUrl');
         }
     }
 
@@ -169,8 +182,10 @@ class TournamentManager {
 
     async loadFromStorage() {
         // Try to load backend URL and tournament ID first
-        let savedUrl = localStorage.getItem('backendUrl');
-        if (savedUrl) {
+        let savedUrl = (typeof localStorage !== 'undefined') ? localStorage.getItem('backendUrl') : null;
+        if (savedUrl === 'local') {
+            this.backendUrl = null;
+        } else if (savedUrl) {
             if (savedUrl.includes('github.io')) {
                 localStorage.removeItem('backendUrl');
                 this.backendUrl = null;

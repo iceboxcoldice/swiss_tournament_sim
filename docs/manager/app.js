@@ -387,6 +387,7 @@ const backendConfigModal = document.getElementById('backendConfigModal');
 const backendUrlInput = document.getElementById('backendUrlInput');
 const saveBackendBtn = document.getElementById('saveBackendBtn');
 const closeBackendBtn = document.getElementById('closeBackendBtn');
+const disconnectBackendBtn = document.getElementById('disconnectBackendBtn');
 const connectionStatus = document.getElementById('connectionStatus');
 
 console.log('Backend elements:', {
@@ -395,14 +396,18 @@ console.log('Backend elements:', {
     backendUrlInput,
     saveBackendBtn,
     closeBackendBtn,
+    disconnectBackendBtn,
     connectionStatus
 });
 
 // Initialize backend config
 const savedBackendUrl = localStorage.getItem('backendUrl');
-if (savedBackendUrl) {
+if (savedBackendUrl && savedBackendUrl !== 'local') {
     tournament.setBackendUrl(savedBackendUrl);
     updateConnectionStatus(true);
+} else {
+    tournament.disconnectBackend();
+    updateConnectionStatus(false);
 }
 
 if (backendConfigBtn) {
@@ -411,6 +416,10 @@ if (backendConfigBtn) {
         console.log('Cloud button clicked!');
         console.log('Modal before:', backendConfigModal.className);
         backendUrlInput.value = tournament.backendUrl || '';
+        const isConnected = !!tournament.backendUrl;
+        if (disconnectBackendBtn) {
+            disconnectBackendBtn.style.display = isConnected ? 'inline-block' : 'none';
+        }
         backendConfigModal.classList.remove('hidden');
         console.log('Modal after:', backendConfigModal.className);
     });
@@ -421,6 +430,18 @@ if (backendConfigBtn) {
 if (closeBackendBtn) {
     closeBackendBtn.addEventListener('click', () => {
         backendConfigModal.classList.add('hidden');
+    });
+}
+
+if (disconnectBackendBtn) {
+    disconnectBackendBtn.addEventListener('click', async () => {
+        tournament.disconnectBackend();
+        updateConnectionStatus(false);
+        backendUrlInput.value = '';
+        backendConfigModal.classList.add('hidden');
+        showNotification('Switched to Local Mode', 'Disconnected from cloud backend. Now running in Local Mode.');
+        await tournament.loadFromStorage();
+        initUI();
     });
 }
 
@@ -460,10 +481,11 @@ if (saveBackendBtn) {
             }
         } else {
             // Clear backend and explicitly stay in local mode
-            tournament.setBackendUrl(null);
-            localStorage.setItem('backendUrl', 'local');
+            tournament.disconnectBackend();
             updateConnectionStatus(false);
             backendConfigModal.classList.add('hidden');
+            showNotification('Switched to Local Mode', 'Disconnected from cloud backend. Now running in Local Mode.');
+            await tournament.loadFromStorage();
             initUI();
         }
     });
@@ -475,9 +497,15 @@ function updateConnectionStatus(connected) {
             const urlText = tournament.backendUrl ? `: ${tournament.backendUrl}` : '';
             connectionStatus.textContent = `Cloud Connected${urlText}`;
             connectionStatus.className = 'text-green-500 text-sm font-medium';
+            if (disconnectBackendBtn) {
+                disconnectBackendBtn.style.display = 'inline-block';
+            }
         } else {
             connectionStatus.textContent = 'Local Mode';
             connectionStatus.className = 'text-gray-500 text-sm font-medium';
+            if (disconnectBackendBtn) {
+                disconnectBackendBtn.style.display = 'none';
+            }
         }
     }
 }
