@@ -1,15 +1,76 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Deploy Script: Tabroom Backend to Remote Server
+# Deploy Script: Swiss Tournament Manager Backend
+# ==============================================================================
+# Usage:
+#   ./deploy.sh                # Deploys to Google Cloud App Engine (default)
+#   ./deploy.sh gcloud         # Explicit Google Cloud App Engine deploy
+#   ./deploy.sh <target_host>  # Deploys Docker container to remote server (e.g. ./deploy.sh m2)
 # ==============================================================================
 set -euo pipefail
 
-TARGET_HOST="${1:-${DEPLOY_HOST:-m2}}"
-REMOTE_SUBDIR="${REMOTE_DIR:-docker/swiss_tournament_sim}"
+TARGET="${1:-gcloud}"
 LOCAL_REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+if [ "$TARGET" = "gcloud" ]; then
+    echo "========================================================================"
+    echo "🚀 Deploying Backend to Google Cloud App Engine (default)"
+    echo "📁 Source directory: ${LOCAL_REPO_DIR}"
+    echo "========================================================================"
+    echo ""
+
+    if ! command -v gcloud >/dev/null 2>&1; then
+        echo "❌ ERROR: 'gcloud' CLI is not installed or not in PATH."
+        exit 1
+    fi
+
+    ACTIVE_PROJECT="${GCLOUD_PROJECT:-$(gcloud config get-value project 2>/dev/null || echo '')}"
+    if [ -z "${ACTIVE_PROJECT}" ]; then
+        echo "❌ ERROR: No active Google Cloud project found."
+        echo "   Set GCLOUD_PROJECT=<project_id> or run 'gcloud config set project <project_id>'."
+        exit 1
+    fi
+    echo "🔍 Active Google Cloud project: ${ACTIVE_PROJECT}"
+
+    echo "📦 Deploying App Engine service using app.yaml..."
+    gcloud app deploy "${LOCAL_REPO_DIR}/app.yaml" --quiet
+
+    echo ""
+    echo "🔍 Verifying deployed service health..."
+    APP_HOSTNAME=$(gcloud app describe --format='value(defaultHostname)' 2>/dev/null || true)
+    if [ -n "${APP_HOSTNAME}" ]; then
+        HEALTH_URL="https://${APP_HOSTNAME}/api/health"
+        echo "   Pinging ${HEALTH_URL}..."
+        for i in {1..10}; do
+            if curl -sf "${HEALTH_URL}" >/dev/null 2>&1; then
+                echo "   ✅ Backend is responding healthy!"
+                break
+            fi
+            sleep 2
+        done
+
+        echo ""
+        echo "========================================================================"
+        echo "🎉 Successfully deployed to Google Cloud App Engine!"
+        echo "========================================================================"
+        echo "🌐 Service URL: https://${APP_HOSTNAME}"
+        echo "👉 In Tournament Manager (⚙️ Tools ▾ -> ☁️ Cloud Backend):"
+        echo "   Enter: https://${APP_HOSTNAME}"
+        echo "========================================================================"
+    else
+        echo "✅ Deployment finished."
+    fi
+    exit 0
+fi
+
+# ------------------------------------------------------------------------------
+# Remote Docker Server Deployment (e.g. ./deploy.sh m2 or ./deploy.sh <target_host>)
+# ------------------------------------------------------------------------------
+TARGET_HOST="${TARGET}"
+REMOTE_SUBDIR="${REMOTE_DIR:-docker/swiss_tournament_sim}"
+
 echo "========================================================================"
-echo "🚀 Deploying Tabroom Backend to: ${TARGET_HOST}"
+echo "🚀 Deploying Tabroom Backend to Remote Server: ${TARGET_HOST}"
 echo "📁 Source directory:  ${LOCAL_REPO_DIR}"
 echo "📂 Remote directory:  ~/${REMOTE_SUBDIR}"
 echo "========================================================================"
@@ -18,7 +79,7 @@ echo ""
 # 1. Connectivity Check
 echo "🔍 [1/5] Checking SSH connection to ${TARGET_HOST}..."
 if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "${TARGET_HOST}" "echo 'Connected successfully'" >/dev/null 2>&1; then
-    echo "❌ ERROR: Cannot reach '${TARGET_HOST}' via SSH. Please verify Tailscale/SSH connectivity."
+    echo "❌ ERROR: Cannot reach '${TARGET_HOST}' via SSH. Please verify network/SSH connectivity."
     exit 1
 fi
 echo "   ✅ SSH connection verified."
