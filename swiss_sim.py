@@ -462,11 +462,12 @@ def run_tournament(
     debug_ranks: List[int] = [],
     use_buchholz: bool = False,
     win_model: str = 'elo',
+    pairing_scheme: str = 'high-low'
 ) -> List[Team]:
     teams = [Team(id=i, true_rank=i+1) for i in range(num_teams)]
     
     for round_num in range(num_rounds):
-        pairs = pair_round(teams, round_num, use_buchholz=use_buchholz)
+        pairs = pair_round(teams, round_num, use_buchholz=use_buchholz, pairing_scheme=pairing_scheme)
         for t1, t2 in pairs:
             if t2 is None:
                 # Bye match already scored in pair_round

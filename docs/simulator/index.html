@@ -436,10 +436,12 @@
                     <div class="stat-card">
                         <div class="stat-label">Team A Win Rate</div>
                         <div class="stat-value primary" id="h2h_teamAPerc"></div>
+                        <div class="stat-subtext" id="h2h_teamACI" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.35rem;"></div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-label">Team B Win Rate</div>
                         <div class="stat-value secondary" id="h2h_teamBPerc"></div>
+                        <div class="stat-subtext" id="h2h_teamBCI" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.35rem;"></div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-label">Total Matchups</div>
@@ -885,6 +887,7 @@
                     <div class="stat-card">
                         <div class="stat-label">Top N Probability</div>
                         <div class="stat-value primary" id="topNHistory_probability"></div>
+                        <div class="stat-subtext" id="topNHistory_CI" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.35rem;"></div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-label">Teams in Top N</div>
@@ -903,8 +906,8 @@
         </div>
     </div>
 
-    <script src="simulation.js"></script>
-    <script src="ui.js"></script>
+    <script src="simulation.js?v=2"></script>
+    <script src="ui.js?v=2"></script>
 </body>
 
 </html>

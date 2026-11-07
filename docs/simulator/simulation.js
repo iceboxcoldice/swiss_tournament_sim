@@ -384,11 +384,11 @@ function pairRound(teams, roundNum, useBuchholz, pairingScheme = 'high-low') {
 }
 
 // Run a tournament
-function runTournament(numTeams, numRounds, useBuchholz, winModel) {
+function runTournament(numTeams, numRounds, useBuchholz, winModel, pairingScheme = 'high-low') {
     const teams = Array.from({ length: numTeams }, (_, i) => new Team(i, i + 1));
 
     for (let round = 0; round < numRounds; round++) {
-        const pairs = pairRound(teams, round, useBuchholz);
+        const pairs = pairRound(teams, round, useBuchholz, pairingScheme);
 
         for (const [teamA, teamB] of pairs) {
             if (!teamB) {

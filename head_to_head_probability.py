@@ -12,6 +12,7 @@ adaptively determine the number needed for stable results.
 """
 
 import sys
+import math
 from collections import defaultdict
 
 # Import shared utilities
@@ -222,17 +223,29 @@ def main():
         print("Try running more simulations or using different histories.")
         sys.exit(0)
 
-    # Calculate probabilities
+    # Calculate probabilities and 95% confidence intervals (Wald method)
     total_matchups = team_a_wins + team_b_wins
-    prob_a = (team_a_wins / total_matchups) * 100 if total_matchups > 0 else 0
-    prob_b = (team_b_wins / total_matchups) * 100 if total_matchups > 0 else 0
+    if total_matchups > 0:
+        p_a = team_a_wins / total_matchups
+        p_b = team_b_wins / total_matchups
+        prob_a = p_a * 100
+        prob_b = p_b * 100
+        se = math.sqrt(p_a * (1 - p_a) / total_matchups)
+        moe = 1.95996 * se * 100
+        ci_a_low = max(0.0, prob_a - moe)
+        ci_a_high = min(100.0, prob_a + moe)
+        ci_b_low = max(0.0, prob_b - moe)
+        ci_b_high = min(100.0, prob_b + moe)
+    else:
+        prob_a = prob_b = moe = 0.0
+        ci_a_low = ci_a_high = ci_b_low = ci_b_high = 0.0
 
     # Print results
     print("Results:")
     print("--------")
     print(f"Total matchups found: {matchup_count}")
-    print(f"Team A ({HISTORY_A}) wins: {team_a_wins} ({prob_a:.2f}%)")
-    print(f"Team B ({HISTORY_B}) wins: {team_b_wins} ({prob_b:.2f}%)")
+    print(f"Team A ({HISTORY_A}) wins: {team_a_wins} ({prob_a:.2f}% ± {moe:.2f}%, 95% CI: [{ci_a_low:.1f}%, {ci_a_high:.1f}%])")
+    print(f"Team B ({HISTORY_B}) wins: {team_b_wins} ({prob_b:.2f}% ± {moe:.2f}%, 95% CI: [{ci_b_low:.1f}%, {ci_b_high:.1f}%])")
     print()
     
     if team_a_ranks:

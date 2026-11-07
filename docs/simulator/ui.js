@@ -99,12 +99,31 @@ function displayHeadToHeadResults(results, historyA, historyB) {
     }
 
     const totalWins = teamAWins + teamBWins;
-    const percA = (teamAWins / totalWins * 100).toFixed(2);
-    const percB = (teamBWins / totalWins * 100).toFixed(2);
+    const pA = totalWins > 0 ? teamAWins / totalWins : 0;
+    const pB = totalWins > 0 ? teamBWins / totalWins : 0;
+    const percA = (pA * 100).toFixed(2);
+    const percB = (pB * 100).toFixed(2);
+
+    // 95% Confidence Interval (Wald Margin of Error: 1.96 * SE)
+    const se = totalWins > 0 ? Math.sqrt(pA * (1 - pA) / totalWins) : 0;
+    const moe = 1.95996 * se * 100;
+    const ciALow = Math.max(0, pA * 100 - moe).toFixed(1);
+    const ciAHigh = Math.min(100, pA * 100 + moe).toFixed(1);
+    const ciBLow = Math.max(0, pB * 100 - moe).toFixed(1);
+    const ciBHigh = Math.min(100, pB * 100 + moe).toFixed(1);
 
     document.getElementById('h2h_matchupDisplay').textContent = `${historyA} vs ${historyB}`;
     document.getElementById('h2h_teamAPerc').textContent = percA + '%';
     document.getElementById('h2h_teamBPerc').textContent = percB + '%';
+
+    const teamACI = document.getElementById('h2h_teamACI');
+    if (teamACI) {
+        teamACI.textContent = `± ${moe.toFixed(2)}% (95% CI: ${ciALow}%–${ciAHigh}%)`;
+    }
+    const teamBCI = document.getElementById('h2h_teamBCI');
+    if (teamBCI) {
+        teamBCI.textContent = `± ${moe.toFixed(2)}% (95% CI: ${ciBLow}%–${ciBHigh}%)`;
+    }
     document.getElementById('h2h_totalMatchups').textContent = matchupCount.toLocaleString();
     document.getElementById('h2h_simsRun').textContent = totalSims.toLocaleString();
     document.getElementById('h2h_teamARank').textContent = avgRankA.toFixed(1);
@@ -489,7 +508,18 @@ function displayTopNFromHistoryResults(results, history, topN) {
     const probability = (teamsInTopN / totalTeamsWithHistory) * 100;
     const avgTeamsPerTournament = totalTeamsWithHistory / numSims;
 
+    // 95% Confidence Interval
+    const p = totalTeamsWithHistory > 0 ? teamsInTopN / totalTeamsWithHistory : 0;
+    const se = totalTeamsWithHistory > 0 ? Math.sqrt(p * (1 - p) / totalTeamsWithHistory) : 0;
+    const moe = 1.95996 * se * 100;
+    const ciLow = Math.max(0, p * 100 - moe).toFixed(1);
+    const ciHigh = Math.min(100, p * 100 + moe).toFixed(1);
+
     document.getElementById('topNHistory_probability').textContent = probability.toFixed(2) + '%';
+    const topNCI = document.getElementById('topNHistory_CI');
+    if (topNCI) {
+        topNCI.textContent = `± ${moe.toFixed(2)}% (95% CI: ${ciLow}%–${ciHigh}%)`;
+    }
     document.getElementById('topNHistory_inTopN').textContent = `${teamsInTopN} / ${totalTeamsWithHistory}`;
     document.getElementById('topNHistory_totalTeams').textContent = totalTeamsWithHistory.toLocaleString();
     document.getElementById('topNHistory_avgTeams').textContent = avgTeamsPerTournament.toFixed(2);
