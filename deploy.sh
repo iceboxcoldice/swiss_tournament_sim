@@ -142,32 +142,41 @@ EOF
 
 # 5. Tailscale Sidecar Status & Connection Details
 echo "🛡️  [5/5] Querying Tailscale sidecar status on ${TARGET_HOST}..."
+ssh "${TARGET_HOST}" "docker exec tabroom-tailscale tailscale serve --bg 8081 >/dev/null 2>&1 || true"
+
 SIDECAR_IP=$(ssh "${TARGET_HOST}" "docker exec tabroom-tailscale tailscale ip -4 2>/dev/null || true")
 SIDECAR_DNS=$(ssh "${TARGET_HOST}" "docker exec tabroom-tailscale tailscale status --json 2>/dev/null | grep -i 'DNSName' | head -n 1 | awk -F'\"' '{print \$4}' | sed 's/\.$//' || true")
+
+SERVE_HTTPS_ACTIVE=false
+if [ -n "${SIDECAR_DNS}" ]; then
+    if curl -sf -m 3 "https://${SIDECAR_DNS}/api/health" >/dev/null 2>&1; then
+        SERVE_HTTPS_ACTIVE=true
+    fi
+fi
 
 echo ""
 echo "========================================================================"
 echo "🎉 Tabroom Backend (with Tailscale sidecar) deployed to ${TARGET_HOST}!"
 echo "========================================================================"
 
-if [ -n "${SIDECAR_IP}" ]; then
-    echo "🌐 Tailscale Node: 'tabroom2'"
-    echo "   http://tabroom2:8081"
-    echo "   (or http://${SIDECAR_IP}:8081)"
-    if [ -n "${SIDECAR_DNS}" ]; then
-        echo "   (MagicDNS: http://${SIDECAR_DNS}:8081)"
-    fi
+if [ "${SERVE_HTTPS_ACTIVE}" = "true" ]; then
+    echo "🌐 Tailscale HTTPS URL (Active with SSL - Best for GitHub Pages):"
+    echo "   https://${SIDECAR_DNS}"
     echo ""
+    echo "👉 In Tournament Manager (⚙️ Tools ▾ -> ☁️ Cloud Backend):"
+    echo "   Enter: https://${SIDECAR_DNS}"
+elif [ -n "${SIDECAR_IP}" ]; then
+    echo "🌐 Tailscale Node URL:"
+    if [ -n "${SIDECAR_DNS}" ]; then
+        echo "   http://${SIDECAR_DNS}:8081"
+    fi
+    echo "   http://${SIDECAR_IP}:8081"
+    echo ""
+    echo "👉 In Tournament Manager (when loaded locally or over HTTP):"
+    echo "   Enter: http://${SIDECAR_IP}:8081"
 fi
 
+echo ""
 echo "🔗 Host Direct (LAN / Host port mapping):"
 echo "   http://${TARGET_HOST}:8081"
-echo ""
-echo "👉 In Tournament Manager (⚙️ Tools ▾ -> ☁️ Cloud Backend):"
-if [ -n "${SIDECAR_IP}" ]; then
-    echo "   Enter: http://tabroom2:8081  (or http://${SIDECAR_IP}:8081)"
-else
-    echo "   Enter: http://${TARGET_HOST}:8081"
-    echo "   (Note: If this is the first run, authenticate Tailscale with the URL shown above)"
-fi
 echo "========================================================================"
