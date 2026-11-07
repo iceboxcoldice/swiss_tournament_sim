@@ -1,25 +1,22 @@
-# Use an official Python runtime as a parent image
+# Use official lightweight Python image
 FROM python:3.11-slim
 
-# Set the working directory in the container
 WORKDIR /app
 
-# Copy the requirements file into the container at /app
+# Install dependencies
 COPY requirements.txt .
-
-# Install any needed packages specified in requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the current directory contents into the container at /app
-# This includes main.py, tournament_manager.py, swiss_sim.py, and the docs/ directory
+# Copy application source code
 COPY . .
 
-# Make port 8081 available to the world outside this container
+# Create storage and user directories for persistent volume mounting
+RUN mkdir -p local_storage users
+
 EXPOSE 8081
 
-# Define environment variable
 ENV PORT=8081
 ENV PYTHONUNBUFFERED=1
 
-# Run main.py when the container launches
-CMD ["python", "main.py"]
+# Use gunicorn with 1 worker and multi-threading for state consistency
+CMD ["gunicorn", "-b", "0.0.0.0:8081", "--workers", "1", "--threads", "4", "--timeout", "120", "main:app"]

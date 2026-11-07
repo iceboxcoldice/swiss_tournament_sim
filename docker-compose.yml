@@ -1,14 +1,19 @@
 version: '3.8'
 
 services:
-  tournament-manager:
+  tabroom-backend:
     build: .
+    image: tabroom-backend:latest
+    container_name: tabroom-backend
     ports:
       - "8081:8081"
     volumes:
       - ./local_storage:/app/local_storage
+      - ./users:/app/users
     environment:
       - PORT=8081
-      # Uncomment the line below to enable Google OAuth (requires real sign-in):
-      # - GOOGLE_OAUTH_CLIENT_ID=1040110950776-lp97tkf0bhc36c8s3v405c46hhf0m53m.apps.googleusercontent.com
-    restart: always
+      - TESTING_MODE=true
+      - REQUIRE_USER_APPROVAL=false
+      - SUPER_ADMIN_EMAILS=coldice@gmail.com
+      - GOOGLE_OAUTH_CLIENT_ID=1040110950776-lp97tkf0bhc36c8s3v405c46hhf0m53m.apps.googleusercontent.com
+    restart: unless-stopped
