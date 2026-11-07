@@ -382,6 +382,8 @@ setupForm.addEventListener('submit', async (e) => {
 });
 
 // Backend Configuration
+const toolsDropdownBtn = document.getElementById('toolsDropdownBtn');
+const toolsDropdownMenu = document.getElementById('toolsDropdownMenu');
 const backendConfigBtn = document.getElementById('backendConfigBtn');
 const backendConfigModal = document.getElementById('backendConfigModal');
 const backendUrlInput = document.getElementById('backendUrlInput');
@@ -390,7 +392,35 @@ const closeBackendBtn = document.getElementById('closeBackendBtn');
 const disconnectBackendBtn = document.getElementById('disconnectBackendBtn');
 const connectionStatus = document.getElementById('connectionStatus');
 
+// Tools Dropdown Toggle
+if (toolsDropdownBtn && toolsDropdownMenu) {
+    toolsDropdownBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toolsDropdownMenu.classList.toggle('hidden');
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!toolsDropdownMenu.contains(e.target) && e.target !== toolsDropdownBtn) {
+            toolsDropdownMenu.classList.add('hidden');
+        }
+    });
+
+    toolsDropdownMenu.querySelectorAll('.dropdown-item').forEach(item => {
+        item.addEventListener('click', () => {
+            toolsDropdownMenu.classList.add('hidden');
+        });
+    });
+}
+
+if (connectionStatus) {
+    connectionStatus.addEventListener('click', () => {
+        if (backendConfigBtn) backendConfigBtn.click();
+    });
+}
+
 console.log('Backend elements:', {
+    toolsDropdownBtn,
+    toolsDropdownMenu,
     backendConfigBtn,
     backendConfigModal,
     backendUrlInput,

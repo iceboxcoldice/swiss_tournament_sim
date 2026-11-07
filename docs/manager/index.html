@@ -48,12 +48,22 @@
                 </div>
 
                 <button id="hubBtn" class="btn btn-secondary" title="Return to Tournament Hub">🏠 Hub</button>
-                <button id="exportBtn" class="btn btn-secondary">📥 Export</button>
-                <button id="importBtn" class="btn btn-secondary">📤 Import</button>
+
+                <!-- Tools Dropdown -->
+                <div class="dropdown">
+                    <button id="toolsDropdownBtn" class="btn btn-secondary" type="button" aria-haspopup="true" aria-expanded="false" title="Data and Backend Tools">
+                        ⚙️ Tools ▾
+                    </button>
+                    <div id="toolsDropdownMenu" class="dropdown-menu hidden">
+                        <button id="exportBtn" class="dropdown-item" type="button">📥 Export Tournament</button>
+                        <button id="importBtn" class="dropdown-item" type="button">📤 Import Tournament</button>
+                        <div class="dropdown-divider"></div>
+                        <button id="backendConfigBtn" class="dropdown-item" type="button">☁ Cloud Backend Config</button>
+                    </div>
+                </div>
                 <input type="file" id="importFile" accept=".json" style="display: none;">
-                <button id="backendConfigBtn" class="btn btn-secondary">☁ Cloud</button>
-                <span id="connectionStatus" class="text-gray-500 text-sm font-medium" style="margin-left: 0.5rem;">Local
-                    Mode</span>
+
+                <span id="connectionStatus" class="text-gray-500 text-sm font-medium" style="margin-left: 0.5rem; cursor: pointer;" title="Click to configure Cloud Backend">Local Mode</span>
             </div>
         </header>
 
@@ -271,8 +281,8 @@
 
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="tournament.js?v=32"></script>
-    <script src="app.js?v=32"></script>
+    <script src="tournament.js?v=33"></script>
+    <script src="app.js?v=33"></script>
 </body>
 
 </html>
