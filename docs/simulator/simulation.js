@@ -29,6 +29,7 @@ class Team {
         this.sideHistory = {}; // OppId -> ['Aff', 'Neg', ...]
         this.pulledUpRounds = [];
         this.byeRounds = [];
+        this.isDropped = false;
     }
 }
 
@@ -254,7 +255,8 @@ function pairRound(teams, roundNum, useBuchholz, pairingScheme = 'high-low') {
         updateBuchholz(teams);
     }
 
-    let teamsCopy = [...teams];
+    let teamsCopy = teams.filter(t => !t.isDropped);
+    if (teamsCopy.length < 2) return [];
 
     let byeTeam = null;
     if (teamsCopy.length % 2 !== 0) {

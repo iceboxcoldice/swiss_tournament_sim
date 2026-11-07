@@ -66,6 +66,7 @@ def _reconstruct_teams(data):
         t.institution = t_data.get('institution')
         t.speaker_points_history = t_data.get('speaker_points_history', [])
         t.bye_rounds = t_data.get('bye_rounds', [])
+        t.is_dropped = t_data.get('is_dropped', False)
         teams.append(t)
         
     return data, teams
@@ -269,8 +270,8 @@ def generate_elim_pairings(data, teams, round_num) -> List[Tuple[Team, Team]]:
         # First elim round: Seed based on prelims
         prelim_standings = get_preliminary_standings(data, teams)
         
-        # Take top N teams
-        active_teams_prelim = prelim_standings[:break_size]
+        # Take top N active (non-dropped) teams
+        active_teams_prelim = [pt for pt in prelim_standings if not getattr(pt, 'is_dropped', False)][:break_size]
         
         # Map back to actual Team objects (to persist break_seed)
         active_teams = []
@@ -584,6 +585,39 @@ def _process_match_result(round_id, match_id, aff_id, neg_id, outcome, matches, 
     if speaker_points is not None:
         match['speaker_points'] = speaker_points
     return True, 'OK', ""
+
+def drop_team(data, teams, team_id) -> bool:
+    """Drops a team from the tournament. Forfeits any active, unreported match."""
+    team = next((t for t in teams if t.id == team_id), None)
+    if not team:
+        return False
+    team.is_dropped = True
+    
+    # Check in-progress matches for active round
+    for m in data.get('matches', []):
+        if m.get('result') is None and (m['aff_id'] == team_id or m['neg_id'] == team_id):
+            if m['aff_id'] == team_id:
+                m['result'] = 'N'
+                m['is_forfeit'] = True
+                m['forfeit_team_id'] = team_id
+            else:
+                m['result'] = 'A'
+                m['is_forfeit'] = True
+                m['forfeit_team_id'] = team_id
+                
+    team_map = {t.id: t for t in teams}
+    recalculate_stats(data, teams, team_map)
+    return True
+
+def reinstate_team(data, teams, team_id) -> bool:
+    """Reinstates a dropped team back to active status."""
+    team = next((t for t in teams if t.id == team_id), None)
+    if not team:
+        return False
+    team.is_dropped = False
+    team_map = {t.id: t for t in teams}
+    recalculate_stats(data, teams, team_map)
+    return True
 
 def _handle_single_match_report(args, matches) -> bool:
     try:

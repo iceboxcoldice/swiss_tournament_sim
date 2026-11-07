@@ -24,6 +24,7 @@ class Team {
         this.speaker_points_history = [];
         this.pulled_up_rounds = []; // Rounds in which this team was pulled up to a higher bracket
         this.bye_rounds = []; // Rounds in which this team received a BYE
+        this.is_dropped = false; // Whether this team has dropped out
     }
 }
 
@@ -1317,9 +1318,91 @@ class TournamentManager {
         }
     }
 
+    // Drop a team from the tournament
+    // If the team is currently in an active, unreported match, award a forfeit win to their opponent
+    async dropTeam(teamId) {
+        const team = this.teams.find(t => t.id === teamId);
+        if (!team) throw new Error(`Team ${teamId} not found`);
+        if (team.is_dropped) return true;
+
+        team.is_dropped = true;
+
+        // Check if team is in an in-progress match in the current round
+        const activeMatches = (this.data.matches || []).filter(m => 
+            m.result === null && (m.aff_id === teamId || m.neg_id === teamId)
+        );
+
+        for (const match of activeMatches) {
+            if (match.aff_id === teamId) {
+                // Neg wins by forfeit
+                match.result = 'N';
+                match.is_forfeit = true;
+                match.forfeit_team_id = teamId;
+            } else if (match.neg_id === teamId) {
+                // Aff wins by forfeit
+                match.result = 'A';
+                match.is_forfeit = true;
+                match.forfeit_team_id = teamId;
+            }
+        }
+
+        this.recalculateStats();
+        this.saveToStorage();
+
+        // Enqueue Sync if Cloud Mode
+        if (this.backendUrl) {
+            this.enqueueSync(async () => {
+                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/drop_team`, {
+                    method: 'POST',
+                    headers: this.getAuthHeaders(),
+                    body: JSON.stringify({ team_id: teamId })
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Backend drop team failed');
+                }
+            });
+        }
+
+        return true;
+    }
+
+    // Reinstate a dropped team
+    async reinstateTeam(teamId) {
+        const team = this.teams.find(t => t.id === teamId);
+        if (!team) throw new Error(`Team ${teamId} not found`);
+        if (!team.is_dropped) return true;
+
+        team.is_dropped = false;
+
+        this.recalculateStats();
+        this.saveToStorage();
+
+        // Enqueue Sync if Cloud Mode
+        if (this.backendUrl) {
+            this.enqueueSync(async () => {
+                const response = await fetch(`${this.backendUrl}/api/t/${this.tournamentId}/reinstate_team`, {
+                    method: 'POST',
+                    headers: this.getAuthHeaders(),
+                    body: JSON.stringify({ team_id: teamId })
+                });
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.error || 'Backend reinstate team failed');
+                }
+            });
+        }
+
+        return true;
+    }
+
     // Swiss pairing algorithm – mirrors the Python `pair_round` logic
     generateSwissPairings(roundNum, pairingScheme = null) {
-        let teams = [...this.teams];
+        // Exclude dropped teams
+        let teams = this.teams.filter(t => !t.is_dropped);
+        if (teams.length < 2) {
+            throw new Error(`Cannot pair Round ${roundNum}: at least 2 active teams required (currently ${teams.length} active)`);
+        }
 
         // Update Buchholz before pairing (Python does this)
         this.updateBuchholz();
@@ -1462,24 +1545,26 @@ class TournamentManager {
 
         // Validate break size
         const breakSize = Math.pow(2, num_elim_rounds);
-        if (this.teams.length < breakSize) {
-            throw new Error(`Not enough teams for ${num_elim_rounds} elimination rounds (Need ${breakSize}, have ${this.teams.length})`);
+        // Validate break size against active (non-dropped) teams
+        const activePool = this.teams.filter(t => !t.is_dropped);
+        if (activePool.length < breakSize) {
+            throw new Error(`Not enough active teams for ${num_elim_rounds} elimination rounds (Need ${breakSize}, have ${activePool.length} active)`);
         }
 
         let activeTeams = [];
 
         if (elimRoundIdx === 1) {
             // First elim round: Check if break_seeds already assigned (display mode) or need to assign (pairing mode)
-            const teamsWithSeeds = this.teams.filter(t => t.break_seed !== null && t.break_seed <= breakSize);
+            const teamsWithSeeds = this.teams.filter(t => !t.is_dropped && t.break_seed !== null && t.break_seed <= breakSize);
 
             if (teamsWithSeeds.length === breakSize) {
                 // Break seeds already assigned - use existing seeds (display mode)
                 activeTeams = teamsWithSeeds.sort((a, b) => a.break_seed - b.break_seed);
             } else {
-                // Initial pairing - calculate from preliminary standings
+                // Initial pairing - calculate from preliminary standings (filter out dropped)
                 const prelimStandings = this.getPreliminaryStandings();
                 // Get actual team references (not copies) from this.teams
-                activeTeams = prelimStandings.slice(0, breakSize).map(t =>
+                activeTeams = prelimStandings.filter(t => !t.is_dropped).slice(0, breakSize).map(t =>
                     this.teams.find(team => team.id === t.id)
                 );
 
@@ -2328,7 +2413,8 @@ class TournamentManager {
                 break_seed: t.break_seed,
                 speaker_points_history: t.speaker_points_history,
                 pulled_up_rounds: t.pulled_up_rounds || [],
-                bye_rounds: t.bye_rounds || []
+                bye_rounds: t.bye_rounds || [],
+                is_dropped: t.is_dropped || false
             })),
             judges: this.judges.map(j => ({
                 id: j.id,
@@ -2372,6 +2458,7 @@ class TournamentManager {
             team.speaker_points_history = t.speaker_points_history || [];
             team.pulled_up_rounds = t.pulled_up_rounds || [];
             team.bye_rounds = t.bye_rounds || [];
+            team.is_dropped = t.is_dropped || false;
             return team;
         });
 

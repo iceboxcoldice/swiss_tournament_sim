@@ -1483,6 +1483,76 @@ def register_team_endpoint(tournament_id):
         logger.error(f"Error registering team: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/t/<tournament_id>/drop_team', methods=['POST'])
+@require_auth(allowed_roles=['admin'])
+def drop_team_endpoint(tournament_id):
+    """Drop a team from the tournament."""
+    try:
+        req = request.json or {}
+        team_id = req.get('team_id')
+        if team_id is None:
+            return jsonify({"error": "Missing team_id"}), 400
+
+        data, teams = patched_load_tournament_with_id(tournament_id)
+        if not data:
+            return jsonify({"error": "Tournament not found"}), 404
+
+        if data.get('is_closed'):
+            return jsonify({"error": "Tournament is closed"}), 403
+
+        success = tm.drop_team(data, teams, team_id)
+        if not success:
+            return jsonify({"error": f"Team {team_id} not found"}), 404
+
+        if patched_save_tournament_with_id(data, teams, tournament_id):
+            log_event(
+                action="TEAM_DROPPED",
+                payload={"team_id": team_id},
+                tournament_id=tournament_id,
+                actor=get_current_actor()
+            )
+            return jsonify({"message": f"Team {team_id} dropped successfully"}), 200
+        return jsonify({"error": "Failed to save tournament state"}), 500
+
+    except Exception as e:
+        logger.error(f"Error dropping team: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/t/<tournament_id>/reinstate_team', methods=['POST'])
+@require_auth(allowed_roles=['admin'])
+def reinstate_team_endpoint(tournament_id):
+    """Reinstate a dropped team."""
+    try:
+        req = request.json or {}
+        team_id = req.get('team_id')
+        if team_id is None:
+            return jsonify({"error": "Missing team_id"}), 400
+
+        data, teams = patched_load_tournament_with_id(tournament_id)
+        if not data:
+            return jsonify({"error": "Tournament not found"}), 404
+
+        if data.get('is_closed'):
+            return jsonify({"error": "Tournament is closed"}), 403
+
+        success = tm.reinstate_team(data, teams, team_id)
+        if not success:
+            return jsonify({"error": f"Team {team_id} not found"}), 404
+
+        if patched_save_tournament_with_id(data, teams, tournament_id):
+            log_event(
+                action="TEAM_REINSTATED",
+                payload={"team_id": team_id},
+                tournament_id=tournament_id,
+                actor=get_current_actor()
+            )
+            return jsonify({"message": f"Team {team_id} reinstated successfully"}), 200
+        return jsonify({"error": "Failed to save tournament state"}), 500
+
+    except Exception as e:
+        logger.error(f"Error reinstating team: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/t/<tournament_id>/coaches', methods=['GET'])
 @require_auth(allowed_roles=['admin'])
 def get_coaches_endpoint(tournament_id):

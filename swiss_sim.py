@@ -28,6 +28,8 @@ class Team:
     pulled_up_rounds: list = field(default_factory=list) 
     # Rounds in which this team received a BYE
     bye_rounds: list = field(default_factory=list) 
+    # Whether the team has dropped out of the tournament
+    is_dropped: bool = False 
  
 
 
@@ -322,9 +324,10 @@ def pair_round(teams: List[Team], round_num: int, use_buchholz: bool = False, pa
     if use_buchholz:
         update_buchholz(teams)
     
-    # Create a copy for pairing to avoid mutating original list order
-    # (Matches JS behavior where it shuffles a [...teams] copy)
-    teams_to_pair = list(teams)
+    # Filter out dropped teams
+    teams_to_pair = [t for t in teams if not getattr(t, 'is_dropped', False)]
+    if len(teams_to_pair) < 2:
+        return []
 
     # Tabroom Bye Resolution if odd number of teams
     bye_team = None

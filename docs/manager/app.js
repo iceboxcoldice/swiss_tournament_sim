@@ -1159,7 +1159,7 @@ function showRound(roundNum, highlightMatchId = null) {
                                             </div>
                                         ` : '<div class="result-status"><div class="result-winner">Pending</div></div>') : `
                                             <div class="result-status">
-                                                <div class="result-winner">Winner: ${m.result === 'A' ? 'Aff' : 'Neg'}</div>
+                                                <div class="result-winner">Winner: ${m.result === 'A' ? 'Aff' : 'Neg'}${m.is_forfeit ? ' (Forfeit)' : ''}</div>
                                                 ${canEditMatch ? `
                                                 <div class="correction-buttons">
                                                     <button class="btn btn-sm btn-warning" onclick="correctResult(${m.match_id}, '${m.result}')" title="Switch Winner">✏</button>
@@ -1503,6 +1503,7 @@ async function showEntries() {
                             <td>${team.id}</td>
                             <td>
                                 <a href="#" onclick="showTeamDetails(${team.id}, 'entries'); return false;" class="team-link"><strong>${team.name}</strong></a>
+                                ${team.is_dropped ? '<span class="badge" style="background:#ef4444; color:white; font-size:0.6rem; margin-left:0.5rem; padding:0.1rem 0.3rem; border-radius:3px;">DROPPED</span>' : ''}
                                 ${isOwnInstitution ? '<span class="badge" style="background:var(--primary); color:white; font-size:0.6rem; margin-left:0.5rem; padding:0.1rem 0.3rem; border-radius:3px;">MY TEAM</span>' : ''}
                             </td>
                             <td>${team.institution || '—'}</td>
@@ -1520,9 +1521,17 @@ async function showEntries() {
                             </td>
                             ${canRegister ? `
                             <td style="text-align:right">
-                                ${isAdmin || (isCoach && team.institution === tournament.data.auth.coaches[currentUser.email.toLowerCase()]) ? `
-                                    <button class="btn btn-sm btn-secondary" onclick="showRegisterTeamForm(${team.id})">Edit</button>
-                                ` : ''}
+                                <div style="display:inline-flex; gap:0.3rem">
+                                    ${isAdmin || (isCoach && team.institution === tournament.data.auth.coaches[currentUser.email.toLowerCase()]) ? `
+                                        <button class="btn btn-sm btn-secondary" onclick="showRegisterTeamForm(${team.id})">Edit</button>
+                                    ` : ''}
+                                    ${isAdmin && !tournament.data.is_closed ? `
+                                        ${!team.is_dropped 
+                                            ? `<button class="btn btn-sm btn-danger" onclick="confirmDropTeam(${team.id})" title="Drop team from tournament">Drop</button>`
+                                            : `<button class="btn btn-sm btn-warning" onclick="confirmReinstateTeam(${team.id})" title="Reinstate team">Reinstate</button>`
+                                        }
+                                    ` : ''}
+                                </div>
                             </td>
                             ` : ''}
                         </tr>
@@ -1989,7 +1998,10 @@ function showStandings() {
                 ${standingsData.map((team, index) => `
                     <tr>
                         <td>${index + 1}</td>
-                        <td><a href="#" onclick="showTeamDetails(${team.id}, 'standings'); return false;" class="team-link"><strong>${team.name}</strong></a></td>
+                        <td>
+                            <a href="#" onclick="showTeamDetails(${team.id}, 'standings'); return false;" class="team-link"><strong>${team.name}</strong></a>
+                            ${team.is_dropped ? '<span class="badge" style="background:#ef4444; color:white; font-size:0.6rem; margin-left:0.4rem; padding:0.1rem 0.35rem; border-radius:3px;">DROPPED</span>' : ''}
+                        </td>
                         <td>${isPrelim ? team.prelim_wins : team.wins}</td>
                         <td>${isPrelim ? team.prelim_score.toFixed(1) : team.score.toFixed(1)}</td>
                         <td>${isPrelim ? team.prelim_buchholz.toFixed(1) : team.buchholz.toFixed(1)}</td>
@@ -2348,10 +2360,21 @@ window.showTeamDetails = function (teamId, previousView = null) {
         <div class="card">
             <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 2rem;">
                 <div>
-                    <h3 style="margin:0">Team Details: ${team.name}</h3>
+                    <h3 style="margin:0; display:flex; align-items:center;">
+                        Team Details: ${team.name}
+                        ${team.is_dropped ? '<span class="badge" style="background:#ef4444; color:white; padding:0.15rem 0.5rem; border-radius:3px; font-size:0.8rem; margin-left:0.6rem;">DROPPED</span>' : ''}
+                    </h3>
                     <p class="text-muted" style="margin-top:0.5rem">ID: ${team.id} | ${team.institution || 'No Institution'}</p>
                 </div>
-                <button class="btn btn-secondary" onclick="goBack()">${backLabel}</button>
+                <div style="display: flex; gap: 0.5rem;">
+                    ${(getUserRole() === 'admin' && !tournament.data.is_closed) ? `
+                        ${!team.is_dropped 
+                            ? `<button class="btn btn-danger" onclick="confirmDropTeam(${team.id})">Drop Team</button>`
+                            : `<button class="btn btn-warning" onclick="confirmReinstateTeam(${team.id})">Reinstate Team</button>`
+                        }
+                    ` : ''}
+                    <button class="btn btn-secondary" onclick="goBack()">${backLabel}</button>
+                </div>
             </div>
 
             <div class="stats-grid" style="margin-bottom: 2rem;">
@@ -2464,6 +2487,66 @@ window.showTeamDetails = function (teamId, previousView = null) {
             </table>
         </div>
     `;
+};
+
+// Drop Team Handlers
+window.confirmDropTeam = function (teamId) {
+    const team = tournament.teams.find(t => t.id === teamId);
+    if (!team) return;
+
+    showConfirm(
+        'Drop Team',
+        `Are you sure you want to drop "${team.name}"? They will be excluded from all future pairings. If they are in an active match, a forfeit win will be awarded to their opponent.`,
+        async () => {
+            showLoading('Dropping team...');
+            try {
+                await tournament.dropTeam(teamId);
+                showNotification('Success', `Team "${team.name}" has been dropped.`);
+                if (activeTab === `team${teamId}`) {
+                    showTeamDetails(teamId);
+                } else if (activeTab === 'entries') {
+                    showEntries();
+                } else if (activeTab === 'standings') {
+                    showStandings();
+                } else if (activeTab.startsWith('round')) {
+                    const rNum = parseInt(activeTab.replace('round', ''));
+                    showRound(rNum);
+                }
+            } catch (err) {
+                showNotification('Error', err.message);
+            } finally {
+                hideLoading();
+            }
+        }
+    );
+};
+
+window.confirmReinstateTeam = function (teamId) {
+    const team = tournament.teams.find(t => t.id === teamId);
+    if (!team) return;
+
+    showConfirm(
+        'Reinstate Team',
+        `Are you sure you want to reinstate "${team.name}"? They will become eligible for future round pairings.`,
+        async () => {
+            showLoading('Reinstating team...');
+            try {
+                await tournament.reinstateTeam(teamId);
+                showNotification('Success', `Team "${team.name}" has been reinstated.`);
+                if (activeTab === `team${teamId}`) {
+                    showTeamDetails(teamId);
+                } else if (activeTab === 'entries') {
+                    showEntries();
+                } else if (activeTab === 'standings') {
+                    showStandings();
+                }
+            } catch (err) {
+                showNotification('Error', err.message);
+            } finally {
+                hideLoading();
+            }
+        }
+    );
 };
 
 // Go back to previous view
