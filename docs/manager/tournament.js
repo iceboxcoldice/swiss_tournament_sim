@@ -62,10 +62,18 @@ class TournamentManager {
         this.onSyncStatusChange = null;
     }
 
-    // Add task to sync queue
-    enqueueSync(task) {
+    // Add task to sync queue with micro-debounce
+    enqueueSync(task, immediate = false) {
         this.syncQueue.push(task);
-        this.processSyncQueue();
+        if (immediate) {
+            if (this._syncTimer) clearTimeout(this._syncTimer);
+            this.processSyncQueue();
+        } else {
+            if (this._syncTimer) clearTimeout(this._syncTimer);
+            this._syncTimer = setTimeout(() => {
+                this.processSyncQueue();
+            }, 100);
+        }
     }
 
     // Auth Token Helper

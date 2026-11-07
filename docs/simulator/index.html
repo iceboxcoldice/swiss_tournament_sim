@@ -5,6 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Policy Debate Tournament Simulator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -283,9 +286,13 @@
         }
 
         .distribution-table th {
-            background: var(--background);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: var(--surface);
             font-weight: 600;
             color: var(--text-muted);
+            border-bottom: 2px solid var(--border);
         }
 
         .distribution-table tr:hover {
@@ -906,8 +913,8 @@
         </div>
     </div>
 
-    <script src="simulation.js?v=2"></script>
-    <script src="ui.js?v=2"></script>
+    <script src="simulation.js?v=3"></script>
+    <script src="ui.js?v=3"></script>
 </body>
 
 </html>

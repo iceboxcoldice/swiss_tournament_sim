@@ -468,22 +468,25 @@ async function runHeadToHeadSimulation(params, progressCallback) {
             );
 
             const targetRound = historyA.length;
+            const teamMap = new Map();
+            for (const t of teams) teamMap.set(t.id, t);
 
             for (const teamA of teamsA) {
                 if (targetRound >= teamA.opponentHistory.length) continue;
+                const oppId = teamA.opponentHistory[targetRound];
+                const teamB = teamMap.get(oppId);
 
-                for (const teamB of teamsB) {
-                    if (teamA.opponentHistory[targetRound] === teamB.id) {
-                        matchupCount++;
-                        teamARanks.push(teamA.trueRank);
-                        teamBRanks.push(teamB.trueRank);
+                if (teamB && teamB.history.length >= historyB.length &&
+                    teamB.history.slice(0, historyB.length).join('') === historyB) {
+                    matchupCount++;
+                    teamARanks.push(teamA.trueRank);
+                    teamBRanks.push(teamB.trueRank);
 
-                        // Use actual match result from tournament history
-                        if (teamA.history[targetRound] === 'W') {
-                            teamAWins++;
-                        } else {
-                            teamBWins++;
-                        }
+                    // Use actual match result from tournament history
+                    if (teamA.history[targetRound] === 'W') {
+                        teamAWins++;
+                    } else {
+                        teamBWins++;
                     }
                 }
             }

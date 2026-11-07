@@ -1181,9 +1181,9 @@ function showRound(roundNum, highlightMatchId = null) {
                                 <div class="match-section">
                                     <div class="match-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
                                         <span class="match-id">Match ${m.match_id}</span>
-                                        <div style="display:flex; gap:0.3rem;">
-                                            ${m.flight ? `<span class="badge" style="background:#0284c7; color:white; font-size:0.7rem; padding:1px 5px; border-radius:3px;">Flight ${m.flight === 1 ? 'A' : 'B'}</span>` : ''}
-                                            ${m.room ? `<span class="badge" style="background:#475569; color:white; font-size:0.7rem; padding:1px 5px; border-radius:3px;">📍 ${m.room}</span>` : ''}
+                                        <div style="display:flex; gap:0.4rem; align-items:center;">
+                                            ${m.flight ? `<span class="flight-badge">✈️ Flight ${m.flight === 1 ? 'A' : 'B'}</span>` : ''}
+                                            ${m.room ? `<span class="room-badge">📍 ${m.room}</span>` : ''}
                                         </div>
                                     </div>
                                     <div class="match-content">

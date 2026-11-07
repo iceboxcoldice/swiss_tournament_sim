@@ -41,11 +41,46 @@ function switchTab(tabName) {
     event.target.classList.add('active');
 }
 
+// Background Web Worker runner with automatic fallback
+let simWorker = null;
+
+function runSimulationTask(simType, params, fallbackFn, progressCallback) {
+    if (typeof Worker !== 'undefined') {
+        try {
+            if (!simWorker) {
+                simWorker = new Worker('worker.js?v=2');
+            }
+            const taskId = Math.random().toString(36).substring(2, 9);
+            return new Promise((resolve, reject) => {
+                const handler = (e) => {
+                    const data = e.data;
+                    if (!data || data.id !== taskId) return;
+                    if (data.type === 'PROGRESS') {
+                        if (progressCallback) progressCallback(data.current, data.total);
+                    } else if (data.type === 'COMPLETE') {
+                        simWorker.removeEventListener('message', handler);
+                        resolve(data.result);
+                    } else if (data.type === 'ERROR') {
+                        simWorker.removeEventListener('message', handler);
+                        reject(new Error(data.error));
+                    }
+                };
+                simWorker.addEventListener('message', handler);
+                simWorker.postMessage({ id: taskId, type: simType, params });
+            });
+        } catch (e) {
+            console.warn('Worker initialization failed, using main thread fallback:', e);
+        }
+    }
+    // Fallback if Worker fails or not supported (e.g. file:// protocol)
+    return fallbackFn(params, progressCallback);
+}
+
 // Head-to-Head Form Handler
 document.getElementById('h2hForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    getAndHandleSeed();
+    const seed = getAndHandleSeed();
 
     const numTeams = parseInt(document.getElementById('h2h_teams').value);
     const historyA = document.getElementById('h2h_historyA').value.replace(/\s/g, '').toUpperCase();
@@ -70,8 +105,10 @@ document.getElementById('h2hForm').addEventListener('submit', async (e) => {
     e.target.querySelector('button').disabled = true;
 
     try {
-        const results = await runHeadToHeadSimulation(
-            { numTeams, numRounds, historyA, historyB, minMatchups, useBuchholz, winModel },
+        const results = await runSimulationTask(
+            'HEAD_TO_HEAD',
+            { numTeams, numRounds, historyA, historyB, minMatchups, useBuchholz, winModel, seed },
+            runHeadToHeadSimulation,
             (sims, matchups) => {
                 const progress = Math.min((matchups / minMatchups) * 100, 100);
                 document.getElementById('h2h_progressFill').style.width = progress + '%';
@@ -151,8 +188,10 @@ document.getElementById('topNForm').addEventListener('submit', async (e) => {
     e.target.querySelector('button').disabled = true;
 
     try {
-        const results = await runTopNSimulation(
-            { numTeams, numRounds, topN, numSims, useBuchholz, winModel },
+        const results = await runSimulationTask(
+            'TOP_N',
+            { numTeams, numRounds, topN, numSims, useBuchholz, winModel, seed },
+            runTopNSimulation,
             (current, total) => {
                 const progress = (current / total) * 100;
                 document.getElementById('topN_progressFill').style.width = progress + '%';
@@ -211,8 +250,10 @@ document.getElementById('winDistForm').addEventListener('submit', async (e) => {
     e.target.querySelector('button').disabled = true;
 
     try {
-        const results = await runWinDistSimulation(
-            { numTeams, numRounds, targetRank, numSims, useBuchholz, winModel },
+        const results = await runSimulationTask(
+            'WIN_DIST',
+            { numTeams, numRounds, targetRank, numSims, useBuchholz, winModel, seed },
+            runWinDistSimulation,
             (current, total) => {
                 const progress = (current / total) * 100;
                 document.getElementById('winDist_progressFill').style.width = progress + '%';
@@ -276,8 +317,10 @@ document.getElementById('rankFromWinsForm').addEventListener('submit', async (e)
     e.target.querySelector('button').disabled = true;
 
     try {
-        const results = await runRankFromWinsSimulation(
-            { numTeams, numRounds, targetWins, numSims, useBuchholz, winModel },
+        const results = await runSimulationTask(
+            'RANK_FROM_WINS',
+            { numTeams, numRounds, targetWins, numSims, useBuchholz, winModel, seed },
+            runRankFromWinsSimulation,
             (current, total) => {
                 const progress = (current / total) * 100;
                 document.getElementById('rankWins_progressFill').style.width = progress + '%';
@@ -373,8 +416,10 @@ document.getElementById('rankHistoryForm').addEventListener('submit', async (e) 
     e.target.querySelector('button').disabled = true;
 
     try {
-        const results = await runRankFromHistorySimulation(
-            { numTeams, numRounds, history, numSims, useBuchholz, winModel },
+        const results = await runSimulationTask(
+            'RANK_FROM_HISTORY',
+            { numTeams, numRounds, history, numSims, useBuchholz, winModel, seed },
+            runRankFromHistorySimulation,
             (current, total) => {
                 const progress = (current / total) * 100;
                 document.getElementById('rankHistory_progressFill').style.width = progress + '%';
@@ -476,8 +521,10 @@ document.getElementById('topNHistoryForm').addEventListener('submit', async (e) 
     e.target.querySelector('button').disabled = true;
 
     try {
-        const results = await runTopNFromHistorySimulation(
-            { numTeams, numRounds, history, topN, numSims, useBuchholz, winModel },
+        const results = await runSimulationTask(
+            'TOP_N_HISTORY',
+            { numTeams, numRounds, history, topN, numSims, useBuchholz, winModel, seed },
+            runTopNFromHistorySimulation,
             (current, total) => {
                 const progress = (current / total) * 100;
                 document.getElementById('topNHistory_progressFill').style.width = progress + '%';
