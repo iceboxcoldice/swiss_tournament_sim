@@ -161,9 +161,14 @@ function updateAuthUI() {
     if (currentUser) {
         if (signInBtn) signInBtn.style.display = 'none';
         if (userProfile) {
-            userProfile.style.display = 'flex';
-            userName.innerText = currentUser.name;
-            userAvatar.src = currentUser.picture;
+            userProfile.style.display = 'inline-flex';
+            userName.innerText = currentUser.name || currentUser.email || 'User';
+            if (currentUser.picture) {
+                userAvatar.src = currentUser.picture;
+                userAvatar.style.display = 'inline-block';
+            } else {
+                userAvatar.style.display = 'none';
+            }
         }
     } else {
         if (signInBtn) signInBtn.style.display = 'block';
@@ -524,15 +529,25 @@ if (saveBackendBtn) {
 function updateConnectionStatus(connected) {
     if (connectionStatus) {
         if (connected) {
-            const urlText = tournament.backendUrl ? `: ${tournament.backendUrl}` : '';
-            connectionStatus.textContent = `Cloud Connected${urlText}`;
-            connectionStatus.className = 'text-green-500 text-sm font-medium';
+            let label = 'Cloud Connected';
+            if (tournament.backendUrl) {
+                try {
+                    const host = new URL(tournament.backendUrl).hostname.replace('.appspot.com', '').replace('.uc.r', '');
+                    label = `Cloud (${host})`;
+                } catch (e) {
+                    label = 'Cloud Connected';
+                }
+            }
+            connectionStatus.innerHTML = `<span class="status-dot online"></span> ${label}`;
+            connectionStatus.className = 'status-pill online';
+            connectionStatus.title = tournament.backendUrl ? `Connected to ${tournament.backendUrl} (Click to configure)` : 'Click to configure Cloud Backend';
             if (disconnectBackendBtn) {
                 disconnectBackendBtn.style.display = 'inline-block';
             }
         } else {
-            connectionStatus.textContent = 'Local Mode';
-            connectionStatus.className = 'text-gray-500 text-sm font-medium';
+            connectionStatus.innerHTML = `<span class="status-dot local"></span> Local Mode`;
+            connectionStatus.className = 'status-pill local';
+            connectionStatus.title = 'Running locally in browser storage (Click to configure Cloud Backend)';
             if (disconnectBackendBtn) {
                 disconnectBackendBtn.style.display = 'none';
             }
