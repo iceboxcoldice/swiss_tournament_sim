@@ -593,5 +593,67 @@ class TestEventReplay(unittest.TestCase):
         report = event_replay.verify_storage_consistency(self.test_dir, tid)
         self.assertTrue(report['is_consistent'], f"Consistency report failed: {report}")
 
+    def test_team_drop_and_reinstate_replay(self):
+        """Test that TEAM_DROPPED and TEAM_REINSTATED events reconstruct the exact tournament state."""
+        admin_email = 'admin@debate.org'
+        tid = 't-drop-reinstate'
+
+        # 1. Initialize tournament with 4 teams and 2 rounds
+        res_init = self.app.post(
+            f'/api/t/{tid}/init',
+            data=json.dumps({
+                "rounds": 2,
+                "teams": [
+                    {"name": "Stanford A", "institution": "Stanford"},
+                    {"name": "Harvard B", "institution": "Harvard"},
+                    {"name": "Yale C", "institution": "Yale"},
+                    {"name": "Princeton D", "institution": "Princeton"}
+                ]
+            }),
+            content_type='application/json',
+            headers={'X-User-Email': admin_email}
+        )
+        self.assertEqual(res_init.status_code, 200)
+
+        # 2. Start tournament (pairs Round 1)
+        res_start = self.app.post(
+            f'/api/t/{tid}/start',
+            data=json.dumps({"pair_round_1": True}),
+            content_type='application/json',
+            headers={'X-User-Email': admin_email}
+        )
+        self.assertEqual(res_start.status_code, 200)
+
+        # 3. Drop Team 0 mid-round
+        res_drop = self.app.post(
+            f'/api/t/{tid}/drop_team',
+            data=json.dumps({"team_id": 0}),
+            content_type='application/json',
+            headers={'X-User-Email': admin_email}
+        )
+        self.assertEqual(res_drop.status_code, 200)
+
+        # 4. Reinstate Team 0
+        res_reinstate = self.app.post(
+            f'/api/t/{tid}/reinstate_team',
+            data=json.dumps({"team_id": 0}),
+            content_type='application/json',
+            headers={'X-User-Email': admin_email}
+        )
+        self.assertEqual(res_reinstate.status_code, 200)
+
+        # 5. Drop Team 1
+        res_drop2 = self.app.post(
+            f'/api/t/{tid}/drop_team',
+            data=json.dumps({"team_id": 1}),
+            content_type='application/json',
+            headers={'X-User-Email': admin_email}
+        )
+        self.assertEqual(res_drop2.status_code, 200)
+
+        # 6. Verify deterministic event replay consistency
+        report = event_replay.verify_storage_consistency(self.test_dir, tid)
+        self.assertTrue(report['is_consistent'], f"Consistency report failed: {report}")
+
 if __name__ == '__main__':
     unittest.main()

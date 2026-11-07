@@ -158,12 +158,14 @@ class ReplayEngine:
         if action == "TOURNAMENT_INIT":
             rounds = p.get("rounds", 0)
             elim_rounds = p.get("elim_rounds", 0)
+            pairing_scheme = p.get("pairing_scheme", "high-low")
             data = {
                 "config": {
                     "num_teams": p.get("num_teams", len(p.get("teams", []))),
                     "num_prelim_rounds": rounds,
                     "num_elim_rounds": elim_rounds,
                     "num_rounds": rounds + elim_rounds,
+                    "pairing_scheme": pairing_scheme,
                 },
                 "status": p.get("status", "approved"),
                 "is_started": p.get("is_started", False),
@@ -318,6 +320,32 @@ class ReplayEngine:
                 else:
                     teams.append(team_data)
                 data["config"]["num_teams"] = len(teams)
+                self._save_t(tid, data)
+
+        elif action == "TEAM_DROPPED":
+            data = self._load_t(tid)
+            if data:
+                team_id = p.get("team_id")
+                try:
+                    import tournament_manager as tm
+                    data, teams = tm._reconstruct_teams(data)
+                    tm.drop_team(data, teams, team_id)
+                    data['teams'] = [asdict(t) for t in teams]
+                except Exception as e:
+                    logger.warning(f"Drop team failed in replay: {e}")
+                self._save_t(tid, data)
+
+        elif action == "TEAM_REINSTATED":
+            data = self._load_t(tid)
+            if data:
+                team_id = p.get("team_id")
+                try:
+                    import tournament_manager as tm
+                    data, teams = tm._reconstruct_teams(data)
+                    tm.reinstate_team(data, teams, team_id)
+                    data['teams'] = [asdict(t) for t in teams]
+                except Exception as e:
+                    logger.warning(f"Reinstate team failed in replay: {e}")
                 self._save_t(tid, data)
 
         elif action == "JUDGE_ADDED":
@@ -705,6 +733,16 @@ def validate_event_rules(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             team_data = p.get("team", p)
             if team_data and team_data.get("id") is not None:
                 st["teams"].add(team_data["id"])
+
+        elif action in ("TEAM_DROPPED", "TEAM_REINSTATED"):
+            team_id = p.get("team_id")
+            if team_id is not None and team_id not in st["teams"]:
+                violations.append({
+                    "rule": "UNKNOWN_TEAM_DROP",
+                    "message": f"Event #{idx} ({action}) referenced non-existent team {team_id}",
+                    "event_index": idx,
+                    "event": e
+                })
 
         elif action == "JUDGE_ADDED":
             judge = p.get("judge", p)
