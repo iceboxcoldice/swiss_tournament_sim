@@ -27,6 +27,8 @@ class Team {
         this.neg = 0;
         this.lastSide = null; // 'Aff' or 'Neg'
         this.sideHistory = {}; // OppId -> ['Aff', 'Neg', ...]
+        this.pulledUpRounds = [];
+        this.byeRounds = [];
     }
 }
 
@@ -67,21 +69,40 @@ function calculateSidePreference(team) {
 }
 
 // Find best opponent for t1 in group
-function findBestOpponent(t1, group) {
+function findBestOpponent(t1, group, pairingScheme = 'high-low') {
+    let bestNonRepeatDiffSchool = null;
+    let bestNonRepeatDiffSchoolIdx = -1;
     let bestNonRepeat = null;
     let bestNonRepeatIdx = -1;
     let bestSwappable = null;
     let bestSwappableIdx = -1;
 
-    for (let i = 0; i < group.length; i++) {
+    const isHighLow = pairingScheme === 'high-low';
+    const start = isHighLow ? group.length - 1 : 0;
+    const end = isHighLow ? -1 : group.length;
+    const step = isHighLow ? -1 : 1;
+
+    const t1Inst = (t1.institution || '').trim().toLowerCase();
+    const hasT1Inst = t1Inst && t1Inst !== 'unknown' && t1Inst !== 'none';
+
+    for (let i = start; i !== end; i += step) {
         const candidate = group[i];
 
         // Check repeat
         if (!t1.opponentHistory.includes(candidate.id)) {
-            // Priority 1: Non-repeat
-            bestNonRepeat = candidate;
-            bestNonRepeatIdx = i;
-            break; // Strict Swiss: take first valid
+            const candInst = (candidate.institution || '').trim().toLowerCase();
+            const sameSchool = hasT1Inst && candInst && candInst !== 'unknown' && candInst !== 'none' && candInst === t1Inst;
+
+            if (!sameSchool && bestNonRepeatDiffSchool === null) {
+                bestNonRepeatDiffSchool = candidate;
+                bestNonRepeatDiffSchoolIdx = i;
+                break; // Found ideal high-low matchup
+            }
+
+            if (bestNonRepeat === null) {
+                bestNonRepeat = candidate;
+                bestNonRepeatIdx = i;
+            }
         } else {
             // Check for swappable repeat
             if (bestSwappable === null) {
@@ -97,7 +118,9 @@ function findBestOpponent(t1, group) {
         }
     }
 
-    if (bestNonRepeat) {
+    if (bestNonRepeatDiffSchool) {
+        return { opponent: bestNonRepeatDiffSchool, idx: bestNonRepeatDiffSchoolIdx, isSwappable: false };
+    } else if (bestNonRepeat) {
         return { opponent: bestNonRepeat, idx: bestNonRepeatIdx, isSwappable: false };
     } else if (bestSwappable) {
         return { opponent: bestSwappable, idx: bestSwappableIdx, isSwappable: true };
@@ -146,13 +169,98 @@ function updateBuchholz(teams) {
     }
 }
 
+function selectPullUpTeam(topSeed, lowerBracketTeams, roundNum) {
+    if (!lowerBracketTeams || lowerBracketTeams.length === 0) return null;
+
+    const t1Inst = (topSeed.institution || '').trim().toLowerCase();
+    const hasT1Inst = t1Inst && t1Inst !== 'unknown' && t1Inst !== 'none';
+    const topSeedPref = calculateSidePreference(topSeed);
+
+    const eligible = [];
+    for (let i = 0; i < lowerBracketTeams.length; i++) {
+        const cand = lowerBracketTeams[i];
+        if (!topSeed.opponentHistory.includes(cand.id)) {
+            eligible.push({ team: cand, originalIndex: i });
+        }
+    }
+
+    if (eligible.length === 0) {
+        for (let i = 0; i < lowerBracketTeams.length; i++) {
+            const cand = lowerBracketTeams[i];
+            const hist = topSeed.sideHistory[cand.id] || [];
+            if (!hist.includes('Aff') || !hist.includes('Neg')) {
+                eligible.push({ team: cand, originalIndex: i });
+            }
+        }
+    }
+
+    if (eligible.length === 0) return null;
+
+    eligible.sort((a, b) => {
+        const teamA = a.team;
+        const teamB = b.team;
+
+        const pullsA = (teamA.pulledUpRounds || []).length;
+        const pullsB = (teamB.pulledUpRounds || []).length;
+        if (pullsA !== pullsB) return pullsA - pullsB;
+
+        const instA = (teamA.institution || '').trim().toLowerCase();
+        const instB = (teamB.institution || '').trim().toLowerCase();
+        const clashA = hasT1Inst && instA && instA !== 'unknown' && instA === t1Inst ? 1 : 0;
+        const clashB = hasT1Inst && instB && instB !== 'unknown' && instB === t1Inst ? 1 : 0;
+        if (clashA !== clashB) return clashA - clashB;
+
+        const prefA = calculateSidePreference(teamA);
+        const prefB = calculateSidePreference(teamB);
+        const sideClashA = (topSeedPref > 0 && prefA > 0) || (topSeedPref < 0 && prefA < 0) ? 1 : 0;
+        const sideClashB = (topSeedPref > 0 && prefB > 0) || (topSeedPref < 0 && prefB < 0) ? 1 : 0;
+        if (sideClashA !== sideClashB) return sideClashA - sideClashB;
+
+        if (teamA.buchholz !== teamB.buchholz) return teamA.buchholz - teamB.buchholz;
+        return teamA.id - teamB.id;
+    });
+
+    return eligible[0];
+}
+
+// Select the best team to receive a BYE for an odd-numbered field (Tabroom rules)
+function selectByeTeam(teams, roundNum) {
+    if (!teams || teams.length === 0) return null;
+
+    const eligible = teams.filter(t =>
+        (!t.byeRounds || t.byeRounds.length === 0) &&
+        (!t.opponentHistory || !t.opponentHistory.includes(-1))
+    );
+
+    const candidates = eligible.length > 0 ? eligible : [...teams];
+
+    if (roundNum <= 1) {
+        const idx = Math.floor(lcgRandom() * candidates.length);
+        return candidates[idx];
+    }
+
+    candidates.sort((a, b) => {
+        if (a.score !== b.score) return a.score - b.score;
+        if (a.buchholz !== b.buchholz) return a.buchholz - b.buchholz;
+        return b.id - a.id;
+    });
+
+    return candidates[0];
+}
+
 // Pair teams for a round
-function pairRound(teams, roundNum, useBuchholz) {
+function pairRound(teams, roundNum, useBuchholz, pairingScheme = 'high-low') {
     if (useBuchholz) {
         updateBuchholz(teams);
     }
 
-    const teamsCopy = [...teams];
+    let teamsCopy = [...teams];
+
+    let byeTeam = null;
+    if (teamsCopy.length % 2 !== 0) {
+        byeTeam = selectByeTeam(teamsCopy, roundNum);
+        teamsCopy = teamsCopy.filter(t => t.id !== byeTeam.id);
+    }
 
     // Shuffle for randomization
     for (let i = teamsCopy.length - 1; i > 0; i--) {
@@ -172,6 +280,41 @@ function pairRound(teams, roundNum, useBuchholz) {
     }
 
     const sortedScores = Object.keys(scoreGroups).map(Number).sort((a, b) => b - a);
+
+    // Tabroom Pull-Up Resolution for power-matched rounds
+    if (roundNum > 1 && pairingScheme !== 'random') {
+        for (const score of sortedScores) {
+            scoreGroups[score].sort((a, b) => {
+                if (b.score !== a.score) return b.score - a.score;
+                if (useBuchholz && b.buchholz !== a.buchholz) return b.buchholz - a.buchholz;
+                return a.id - b.id;
+            });
+        }
+
+        for (let i = 0; i < sortedScores.length - 1; i++) {
+            const currScore = sortedScores[i];
+            const currGroup = scoreGroups[currScore];
+
+            if (currGroup.length % 2 !== 0) {
+                const topSeed = currGroup[0];
+                for (let j = i + 1; j < sortedScores.length; j++) {
+                    const lowerScore = sortedScores[j];
+                    const lowerGroup = scoreGroups[lowerScore];
+                    if (!lowerGroup || lowerGroup.length === 0) continue;
+
+                    const chosen = selectPullUpTeam(topSeed, lowerGroup, roundNum);
+                    if (chosen) {
+                        const [pulledTeam] = lowerGroup.splice(chosen.originalIndex, 1);
+                        if (!pulledTeam.pulledUpRounds) pulledTeam.pulledUpRounds = [];
+                        pulledTeam.pulledUpRounds.push(roundNum);
+                        currGroup.push(pulledTeam);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
     const pairs = [];
     let floaters = [];
 
@@ -185,7 +328,7 @@ function pairRound(teams, roundNum, useBuchholz) {
         if (roundNum > 1) {
             group.sort((a, b) => {
                 if (b.score !== a.score) return b.score - a.score;
-                // User-defined logic: Sort by Score, then Buchholz, then Random
+                // Sort by Score, then Buchholz, then Random
                 if (useBuchholz && b.buchholz !== a.buchholz) return b.buchholz - a.buchholz;
                 return 0; // Maintain shuffled order (random)
             });
@@ -193,7 +336,7 @@ function pairRound(teams, roundNum, useBuchholz) {
 
         while (group.length > 0) {
             const t1 = group.shift();
-            const { opponent, idx, isSwappable } = findBestOpponent(t1, group);
+            const { opponent, idx, isSwappable } = findBestOpponent(t1, group, pairingScheme);
 
             if (opponent) {
                 group.splice(idx, 1);
@@ -214,11 +357,25 @@ function pairRound(teams, roundNum, useBuchholz) {
         }
         if (floaters.length > 0) {
             // Bye
-            floaters[0].score += 1;
-            floaters[0].wins += 1;
-            floaters[0].history.push('W');
-            floaters[0].opponentHistory.push(-1);
+            const fBye = floaters[0];
+            fBye.score += 1;
+            fBye.wins += 1;
+            fBye.history.push('W');
+            fBye.opponentHistory.push(-1);
+            if (!fBye.byeRounds) fBye.byeRounds = [];
+            fBye.byeRounds.push(roundNum + 1);
+            pairs.push([fBye, null]);
         }
+    }
+
+    if (byeTeam) {
+        byeTeam.score += 1;
+        byeTeam.wins += 1;
+        byeTeam.history.push('W');
+        byeTeam.opponentHistory.push(-1);
+        if (!byeTeam.byeRounds) byeTeam.byeRounds = [];
+        byeTeam.byeRounds.push(roundNum + 1);
+        pairs.push([byeTeam, null]);
     }
 
     return pairs;
@@ -232,6 +389,10 @@ function runTournament(numTeams, numRounds, useBuchholz, winModel) {
         const pairs = pairRound(teams, round, useBuchholz);
 
         for (const [teamA, teamB] of pairs) {
+            if (!teamB) {
+                // Bye match already updated
+                continue;
+            }
             // teamA is Aff, teamB is Neg (assigned by determineSides)
             teamA.aff++;
             teamB.neg++;

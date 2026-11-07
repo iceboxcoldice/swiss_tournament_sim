@@ -317,6 +317,8 @@ setupForm.addEventListener('submit', async (e) => {
     const numTeams = isNaN(numTeamsInput) ? 0 : numTeamsInput;
     const numPrelimRounds = parseInt(document.getElementById('numRounds').value);
     const numElimRounds = parseInt(document.getElementById('numElimRounds').value) || 0;
+    const pairingSchemeInput = document.getElementById('pairingScheme');
+    const pairingScheme = pairingSchemeInput ? pairingSchemeInput.value : 'high-low';
     const teamDataText = document.getElementById('teamData').value;
 
     // Parse team data: Format is "Team Name | Institution | Member 1 | Member 2"
@@ -361,7 +363,7 @@ setupForm.addEventListener('submit', async (e) => {
         }
     }
 
-    const success = await tournament.init(teamDetails.length, numPrelimRounds, numElimRounds, teamDetails);
+    const success = await tournament.init(teamDetails.length, numPrelimRounds, numElimRounds, teamDetails, pairingScheme);
 
     if (success) {
         // Clear navigation history and hash for fresh start
@@ -859,9 +861,9 @@ function renderTabs() {
     }
 }
 
-// Handle New Round Button
-async function handleNewRound() {
-    // Calculate next round based on existing matches
+// Handle New Round Button - Opens configuration modal for Director to choose pairing mode
+function handleNewRound() {
+    if (!tournament || !tournament.data || !tournament.data.config) return;
     const { config } = tournament.data;
     const maxRound = tournament.data.matches.reduce((max, m) => Math.max(max, m.round_num), 0);
     const nextRound = maxRound + 1;
@@ -882,17 +884,82 @@ async function handleNewRound() {
         }
     }
 
-    showLoading('Pairing round...');
-    try {
-        await tournament.pairRound(nextRound);
-        // Refresh UI tabs and then focus on the newly created round
-        updateDashboard();
-        showRound(nextRound);
-    } catch (error) {
-        showNotification('Error', error.message);
-    } finally {
-        hideLoading();
+    openPairRoundModal(nextRound);
+}
+
+// Modal for Director to choose pairing scheme for the round
+function openPairRoundModal(roundNum) {
+    const modal = document.getElementById('pairRoundModal');
+    const title = document.getElementById('pairRoundModalTitle');
+    const desc = document.getElementById('pairRoundModalDesc');
+    const schemeGroup = document.getElementById('pairRoundSchemeGroup');
+    const select = document.getElementById('roundPairingSchemeSelect');
+    const hint = document.getElementById('roundPairingSchemeHint');
+    const confirmBtn = document.getElementById('confirmPairRoundBtn');
+    const cancelBtn = document.getElementById('cancelPairRoundBtn');
+
+    if (!modal) {
+        // Fallback if modal not in DOM
+        tournament.pairRound(roundNum)
+            .then(() => { updateDashboard(); showRound(roundNum); })
+            .catch(err => showNotification('Error', err.message));
+        return;
     }
+
+    const { num_prelim_rounds, num_elim_rounds } = tournament.data.config;
+    const isPrelim = roundNum <= num_prelim_rounds;
+    const defaultScheme = (tournament.data.config && tournament.data.config.pairing_scheme) || 'high-low';
+
+    if (isPrelim) {
+        title.textContent = `Pair Round ${roundNum}`;
+        desc.textContent = `Select pairing parameters for Round ${roundNum} before generating pairings:`;
+        schemeGroup.style.display = 'block';
+
+        if (roundNum <= 2) {
+            select.value = 'random';
+        } else {
+            select.value = defaultScheme;
+        }
+
+        const updateHint = () => {
+            if (select.value === 'high-low') {
+                hint.textContent = 'High-Low: Matches the highest seed vs lowest seed within each win-loss bracket (standard Tabroom power match with same-school protection).';
+            } else if (select.value === 'high-high') {
+                hint.textContent = 'High-High: Matches the top seed vs 2nd seed in each win-loss bracket (adjacent / strong vs strong elimination).';
+            } else {
+                hint.textContent = 'Random Draw: Randomly matches teams within win-loss brackets (preset / random draw).';
+            }
+        };
+        select.onchange = updateHint;
+        updateHint();
+    } else {
+        const elimNum = roundNum - num_prelim_rounds;
+        const elimLabel = getElimRoundLabel(elimNum, num_elim_rounds);
+        title.textContent = `Pair ${elimLabel}`;
+        desc.textContent = `Elimination rounds use standard seeded bracket structure (e.g. 1v8, 4v5, 3v6, 2v7) automatically advancing qualifying winners.`;
+        schemeGroup.style.display = 'none';
+    }
+
+    modal.classList.remove('hidden');
+
+    cancelBtn.onclick = () => {
+        modal.classList.add('hidden');
+    };
+
+    confirmBtn.onclick = async () => {
+        modal.classList.add('hidden');
+        const chosenScheme = isPrelim ? select.value : 'high-low';
+        showLoading(`Pairing ${isPrelim ? 'Round ' + roundNum : 'elimination round'}...`);
+        try {
+            await tournament.pairRound(roundNum, chosenScheme);
+            updateDashboard();
+            showRound(roundNum);
+        } catch (error) {
+            showNotification('Error', error.message);
+        } finally {
+            hideLoading();
+        }
+    };
 }
 
 // Show Round View
@@ -933,6 +1000,15 @@ function showRound(roundNum, highlightMatchId = null) {
     const matches = tournament.getRoundMatches(roundNum);
     const isPrelimRound = roundNum <= num_prelim_rounds;
 
+    // Determine scheme badge for display
+    const roundObj = (tournament.data.rounds || []).find(r => (typeof r === 'object' && r.round_num === roundNum));
+    const roundScheme = (roundObj && roundObj.pairing_scheme) || (tournament.data.config && tournament.data.config.pairing_scheme) || 'high-low';
+    const schemeBadge = isPrelimRound && roundNum > 2 ? (
+        roundScheme === 'high-low' ? '<span class="badge" style="background:#3b82f6; color:white; padding:0.2rem 0.6rem; border-radius:4px; font-size:0.8rem; margin-left:0.5rem; vertical-align:middle;">Hi/Lo</span>' :
+        roundScheme === 'high-high' ? '<span class="badge" style="background:#f59e0b; color:white; padding:0.2rem 0.6rem; border-radius:4px; font-size:0.8rem; margin-left:0.5rem; vertical-align:middle;">Hi/Hi</span>' :
+        '<span class="badge" style="background:#8b5cf6; color:white; padding:0.2rem 0.6rem; border-radius:4px; font-size:0.8rem; margin-left:0.5rem; vertical-align:middle;">Random</span>'
+    ) : (isPrelimRound ? '<span class="badge" style="background:#6b7280; color:white; padding:0.2rem 0.6rem; border-radius:4px; font-size:0.8rem; margin-left:0.5rem; vertical-align:middle;">Preset</span>' : '<span class="badge" style="background:#10b981; color:white; padding:0.2rem 0.6rem; border-radius:4px; font-size:0.8rem; margin-left:0.5rem; vertical-align:middle;">Elim</span>');
+
     const role = getUserRole();
     let myJudgeId = null;
     if (role === 'judge' && tournament.data?.auth?.judges && currentUser) {
@@ -947,7 +1023,7 @@ function showRound(roundNum, highlightMatchId = null) {
     tabContent.innerHTML = `
         <div class="card">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h3>${roundLabel} Pairings ${tournament.data.is_closed ? '<span class="closed-badge" style="background:#ef4444; color:white; padding:0.2rem 0.6rem; border-radius:4px; font-size:0.8rem; margin-left:1rem;">CLOSED</span>' : ''}</h3>
+                <h3>${roundLabel} Pairings ${schemeBadge} ${tournament.data.is_closed ? '<span class="closed-badge" style="background:#ef4444; color:white; padding:0.2rem 0.6rem; border-radius:4px; font-size:0.8rem; margin-left:1rem;">CLOSED</span>' : ''}</h3>
                 ${role === 'admin' ? `
                 <div>
                     <button class="btn btn-secondary" onclick="exportPairings(${roundNum})" title="Export pairings as a CSV file to import into tabular software.">📥 Export CSV</button>
@@ -963,6 +1039,44 @@ function showRound(roundNum, highlightMatchId = null) {
         // Get team members for speaker points
         const affTeam = tournament.teams.find(t => t.id === m.aff_id);
         const negTeam = tournament.teams.find(t => t.id === m.neg_id);
+
+        // Tabroom BYE match rendering
+        if (m.is_bye || m.neg_id === -1) {
+            return `
+                <div class="pairing-item pairing-bye" id="match-${m.match_id}" style="border-left: 4px solid #10b981;">
+                    <div class="pairing-sections">
+                        <div class="team-section team-aff-section">
+                            <div class="team-header">
+                                <a href="#" onclick="showTeamDetails(${m.aff_id}, 'round${roundNum}'); return false;" class="team-link team-aff">${m.aff_name}</a> 
+                                <span class="badge" style="background:#10b981; color:white; padding:0.1rem 0.4rem; border-radius:3px; font-size:0.75rem; margin-left:0.3rem;" title="Awarded automatic win for odd bracket BYE">BYE</span>
+                                <span class="win-indicator">✓</span>
+                            </div>
+                            <div class="members-list" style="color:var(--text-muted); font-size:0.85rem; margin-top:0.3rem;">
+                                ${(affTeam && affTeam.members) ? affTeam.members.map(mb => (mb && mb.name) ? mb.name : mb).join(' & ') : ''}
+                            </div>
+                        </div>
+                        
+                        <div class="team-section" style="display:flex; align-items:center; color:var(--text-muted); font-style:italic;">
+                            BYE (No Opponent - Automatic Win)
+                        </div>
+                        
+                        <div class="match-section">
+                            <div class="match-header">
+                                <span class="match-id">Match ${m.match_id}</span>
+                            </div>
+                            <div class="match-content">
+                                <div class="result-status">
+                                    <div class="result-winner" style="color:#059669; font-weight:600;">Win (Bye)</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        const affIsPullUp = affTeam && (affTeam.pulled_up_rounds || []).includes(roundNum);
+        const negIsPullUp = negTeam && (negTeam.pulled_up_rounds || []).includes(roundNum);
 
         // Get existing speaker points if any
         const existingSP = m.speaker_points || null;
@@ -1010,6 +1124,7 @@ function showRound(roundNum, highlightMatchId = null) {
                                 <div class="team-section team-aff-section">
                                     <div class="team-header">
                                         <a href="#" onclick="showTeamDetails(${m.aff_id}, 'round${roundNum}'); return false;" class="team-link team-aff">${m.aff_name}</a> 
+                                        ${affIsPullUp ? '<span class="badge" style="background:#6366f1; color:white; padding:0.1rem 0.4rem; border-radius:3px; font-size:0.75rem; margin-left:0.3rem;" title="Pulled up from lower bracket">Pull-up</span>' : ''}
                                         <span class="side-label">(Aff)</span>
                                         ${m.result === 'A' ? '<span class="win-indicator">✓</span>' : ''}
                                     </div>
@@ -1022,6 +1137,7 @@ function showRound(roundNum, highlightMatchId = null) {
                                 <div class="team-section team-neg-section">
                                     <div class="team-header">
                                         <a href="#" onclick="showTeamDetails(${m.neg_id}, 'round${roundNum}'); return false;" class="team-link team-neg">${m.neg_name}</a>
+                                        ${negIsPullUp ? '<span class="badge" style="background:#6366f1; color:white; padding:0.1rem 0.4rem; border-radius:3px; font-size:0.75rem; margin-left:0.3rem;" title="Pulled up from lower bracket">Pull-up</span>' : ''}
                                         <span class="side-label">(Neg)</span>
                                         ${m.result === 'N' ? '<span class="win-indicator">✓</span>' : ''}
                                     </div>
@@ -2301,14 +2417,18 @@ window.showTeamDetails = function (teamId, previousView = null) {
                 </thead>
                 <tbody>
                     ${teamMatches.map(match => {
+        const isBye = match.is_bye || match.neg_id === -1;
         const isAff = match.aff_id === teamId;
         const oppId = isAff ? match.neg_id : match.aff_id;
-        const oppName = isAff ? match.neg_name : match.aff_name;
-        const side = isAff ? 'Aff' : 'Neg';
+        const oppName = isBye ? 'BYE' : (isAff ? match.neg_name : match.aff_name);
+        const side = isBye ? '—' : (isAff ? 'Aff' : 'Neg');
 
         let result = '—';
         let resultClass = '';
-        if (match.result !== null) {
+        if (isBye) {
+            result = 'Win (Bye)';
+            resultClass = 'result-win';
+        } else if (match.result !== null) {
             const won = (isAff && match.result === 'A') || (!isAff && match.result === 'N');
             result = won ? 'Win' : 'Loss';
             resultClass = won ? 'result-win' : 'result-loss';
@@ -2327,11 +2447,13 @@ window.showTeamDetails = function (teamId, previousView = null) {
         const p1Points = points[0] !== null ? points[0].toFixed(1) : '—';
         const p2Points = points[1] !== null ? points[1].toFixed(1) : '—';
 
+        const oppCell = isBye ? '<span style="color:var(--text-muted); font-style:italic;">BYE</span>' : `<a href="#" onclick="showTeamDetails(${oppId}); return false;" class="team-link">${oppName}</a>`;
+
         return `
                             <tr>
                                 <td>${roundLabel}</td>
                                 <td>${side}</td>
-                                <td><a href="#" onclick="showTeamDetails(${oppId}); return false;" class="team-link">${oppName}</a></td>
+                                <td>${oppCell}</td>
                                 <td class="${resultClass}">${result}</td>
                                 <td>${p1Points}</td>
                                 <td>${p2Points}</td>

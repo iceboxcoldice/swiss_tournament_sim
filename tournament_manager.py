@@ -65,6 +65,7 @@ def _reconstruct_teams(data):
         t.members = t_data.get('members', [])
         t.institution = t_data.get('institution')
         t.speaker_points_history = t_data.get('speaker_points_history', [])
+        t.bye_rounds = t_data.get('bye_rounds', [])
         teams.append(t)
         
     return data, teams
@@ -100,6 +101,7 @@ def recalculate_stats(data, teams, team_map, max_round=None):
         t.history = []
         t.opponent_history = []
         t.speaker_points_history = [] # Reset and rebuild from matches
+        t.bye_rounds = []
 
     # Re-process all matches
     # Use sorted() to avoid modifying the original list order in data
@@ -107,6 +109,19 @@ def recalculate_stats(data, teams, team_map, max_round=None):
     
     for match in matches:
         if max_round is not None and match['round_num'] > max_round:
+            continue
+            
+        # Handle BYE match
+        if match.get('is_bye') or match.get('neg_id') == -1:
+            aff = team_map.get(match['aff_id'])
+            if aff:
+                aff.wins += 1
+                aff.score += 1.0
+                aff.history.append("W")
+                aff.opponent_history.append(-1)
+                if not hasattr(aff, 'bye_rounds') or aff.bye_rounds is None:
+                    aff.bye_rounds = []
+                aff.bye_rounds.append(match['round_num'])
             continue
             
         # Rebuild speaker points history regardless of result
@@ -271,16 +286,20 @@ def generate_elim_pairings(data, teams, round_num) -> List[Tuple[Team, Team]]:
             high = active_teams[i]
             low = active_teams[len(active_teams) - 1 - i]
             pairs.append((high, low))
+
+        # Reorder pairs for standard bracket flow so top seeds converge in finals
+        # Standard 8-team: 1v8, 4v5, 3v6, 2v7
+        if break_size == 8 and len(pairs) == 4:
+            pairs = [pairs[0], pairs[3], pairs[2], pairs[1]]
+        elif break_size == 16 and len(pairs) == 8:
+            pairs = [pairs[0], pairs[7], pairs[3], pairs[4], pairs[1], pairs[6], pairs[2], pairs[5]]
             
     else:
         # Subsequent rounds: Winners from previous round
         prev_round = round_num - 1
         prev_matches = [m for m in data['matches'] if m['round_num'] == prev_round]
         
-        # Sort matches by match_id to maintain bracket order? 
-        # JS implementation relies on match order.
-        # We need to ensure matches are processed in the order they appear in the bracket.
-        # Assuming match_ids are sequential and represent bracket order.
+        # Sort matches by match_id to maintain bracket order
         prev_matches.sort(key=lambda m: m['match_id'])
         
         winners = []
@@ -292,47 +311,6 @@ def generate_elim_pairings(data, teams, round_num) -> List[Tuple[Team, Team]]:
             else:
                 raise ValueError(f"Match {m['match_id']} has no result")
                 
-        # Pair sequentially (Winner of M1 vs Winner of M2, etc.)
-        # Wait, standard bracket: 1v8 (M1), 4v5 (M2), 3v6 (M3), 2v7 (M4)
-        # Semis: Winner M1 vs Winner M2? 
-        # If we paired 1v8 and 4v5, yes.
-        # But wait, standard seeding usually pairs 1v8 with 4v5.
-        # Let's check how we paired the first round.
-        # 1 vs 8, 2 vs 7, 3 vs 6, 4 vs 5.
-        # If we just append them: [1v8, 2v7, 3v6, 4v5]
-        # Next round: W(1v8) vs W(2v7)? No, usually 1 plays 4/5.
-        # We need to order the first round pairs correctly for the bracket flow.
-        # Standard bracket order for 8 teams:
-        # 1 vs 8
-        # 4 vs 5
-        # 3 vs 6
-        # 2 vs 7
-        # So we need to reorder the initial pairs if we want standard bracket flow.
-        
-        if elim_round_idx == 1:
-            # Reorder pairs for standard bracket
-            # Current pairs are: (1,8), (2,7), (3,6), (4,5) ...
-            # We want: (1,8), (4,5), (3,6), (2,7)
-            # This is a bit complex to generalize for any size.
-            # JS implementation uses `generateBracketPairings` helper.
-            # For now, let's just stick to the simple pairing and assume the user knows or we fix it later.
-            # Actually, if we don't fix it, 1 will play 2 in semis. That's bad.
-            # Let's implement a simple reorder for 8 teams (most common).
-            if break_size == 8:
-                # pairs indices: 0=(1,8), 1=(2,7), 2=(3,6), 3=(4,5)
-                # We want: 0, 3, 2, 1
-                pairs = [pairs[0], pairs[3], pairs[2], pairs[1]]
-            elif break_size == 4:
-                # pairs: 0=(1,4), 1=(2,3)
-                # We want: 0, 1 (1 plays 2? No, 1 plays 4, 2 plays 3. Winners play each other. Correct)
-                pass
-            # For 16 teams?
-            # 1v16, 8v9, 5v12, 4v13, 3v14, 6v11, 7v10, 2v15
-            # Current: 1v16, 2v15, 3v14, 4v13, 5v12, 6v11, 7v10, 8v9
-            # Indices: 0, 7, 4, 3, 2, 5, 6, 1 ... wait.
-            # Let's just use the simple logic for now and add a TODO.
-            pass
-            
         # For subsequent rounds, we pair adjacent winners in the list
         pairs = []
         for i in range(0, len(winners), 2):
@@ -364,24 +342,31 @@ def cmd_init(args):
                 if not line or line.startswith('#'):
                     continue
                 
-                # Format: TeamID, Team Name, Institution, Member1, Member2, ...
+                # Format: TeamID, Team Name, Institution, Member1, Member2, ... OR just Team Name
                 parts = [p.strip() for p in line.split(',')]
-                if len(parts) < 2:
-                    print(f"Warning: Invalid team entry on line {line_num}: {line}")
-                    continue
-                
                 try:
-                    team_id = int(parts[0])
-                    name = parts[1]
-                    institution = parts[2] if len(parts) > 2 else None
-                    members = parts[3:] if len(parts) > 3 else []
+                    if len(parts) == 1:
+                        team_id = len(teams)
+                        name = parts[0]
+                        institution = None
+                        members = []
+                    elif parts[0].isdigit():
+                        team_id = int(parts[0])
+                        name = parts[1]
+                        institution = parts[2] if len(parts) > 2 else None
+                        members = parts[3:] if len(parts) > 3 else []
+                    else:
+                        team_id = len(teams)
+                        name = parts[0]
+                        institution = parts[1] if len(parts) > 1 else None
+                        members = parts[2:] if len(parts) > 2 else []
                     
                     team = Team(id=team_id, true_rank=0, name=name, members=members)
                     if institution:
                         team.institution = institution
                     teams.append(team)
-                except ValueError:
-                    print(f"Warning: Invalid team ID on line {line_num}: {line}")
+                except Exception as e:
+                    print(f"Warning: Invalid team entry on line {line_num}: {line} ({e})")
                     continue
         
         # Sort by ID to ensure correct order
@@ -432,6 +417,7 @@ def cmd_init(args):
             "num_teams": args.num_teams,
             "num_rounds": args.rounds,
             "num_elim_rounds": args.elim_rounds,
+            "pairing_scheme": getattr(args, 'pairing_scheme', 'high-low'),
         },
         "current_round": 0,
         "rounds": [],  # List of round data (match_ids)
@@ -450,7 +436,7 @@ def cmd_init(args):
     finally:
         _tournament_lock.release()
 
-def pair_round_logic(data, teams, round_num):
+def pair_round_logic(data, teams, round_num, pairing_scheme=None):
     """Core logic for pairing a round. Returns list of matches."""
     # Check if this round already exists
     if round_num <= len(data['rounds']):
@@ -472,9 +458,10 @@ def pair_round_logic(data, teams, round_num):
     
     # Generate pairings
     num_prelim_rounds = data['config']['num_rounds']
+    effective_scheme = pairing_scheme or data['config'].get('round_pairing_schemes', {}).get(str(round_num)) or data['config'].get('pairing_scheme', 'high-low')
     
     if round_num <= num_prelim_rounds:
-        pairs = pair_round(teams, round_num - 1, use_buchholz=True)
+        pairs = pair_round(teams, round_num - 1, use_buchholz=True, pairing_scheme=effective_scheme)
     else:
         # Elimination round
         pairs = generate_elim_pairings(data, teams, round_num)
@@ -484,9 +471,10 @@ def pair_round_logic(data, teams, round_num):
 def cmd_pair(args):
     data, teams = load_tournament()
     round_num = args.round
+    pairing_scheme = getattr(args, 'pairing_scheme', None)
     
     try:
-        pairs = pair_round_logic(data, teams, round_num)
+        pairs = pair_round_logic(data, teams, round_num, pairing_scheme=pairing_scheme)
     except ValueError as e:
         print(f"Error: {e}")
         sys.exit(1)
@@ -508,25 +496,39 @@ def cmd_pair(args):
         match_id = next_match_id
         next_match_id += 1
         
-        print(f"Match {match_id}: {aff.name} (Aff) vs {neg.name} (Neg)")
-        
-        match = {
-            "match_id": match_id,
-            "round_num": round_num,
-            "aff_id": aff.id,
-            "neg_id": neg.id,
-            "aff_name": aff.name,
-            "neg_name": neg.name,
-            "result": None,
-            "judge_id": None
-        }
+        if neg is None:
+            print(f"Match {match_id}: {aff.name} (BYE)")
+            match = {
+                "match_id": match_id,
+                "round_num": round_num,
+                "aff_id": aff.id,
+                "neg_id": -1,
+                "aff_name": aff.name,
+                "neg_name": "BYE",
+                "result": "A",
+                "judge_id": None,
+                "is_bye": True
+            }
+        else:
+            print(f"Match {match_id}: {aff.name} (Aff) vs {neg.name} (Neg)")
+            match = {
+                "match_id": match_id,
+                "round_num": round_num,
+                "aff_id": aff.id,
+                "neg_id": neg.id,
+                "aff_name": aff.name,
+                "neg_name": neg.name,
+                "result": None,
+                "judge_id": None
+            }
         existing_matches.append(match)
         round_match_ids.append(match_id)
         
     data['matches'] = existing_matches
     data['next_match_id'] = next_match_id
     
-    round_data = {"round_num": round_num} # No longer storing match_ids here
+    effective_scheme = pairing_scheme or data['config'].get('pairing_scheme', 'high-low')
+    round_data = {"round_num": round_num, "pairing_scheme": effective_scheme}
     data['rounds'].append(round_data)
     
     save_tournament(data, teams) # Lock released in save_tournament
@@ -1199,13 +1201,15 @@ def main():
     parser_init.add_argument('num_teams', type=int, help='Number of teams')
     parser_init.add_argument('rounds', type=int, help='Number of preliminary rounds')
     parser_init.add_argument('--elim-rounds', type=int, default=0, help='Number of elimination rounds (default: 0)')
-    parser_init.add_argument('--teams', dest='teams_file', type=str, help='File containing team info (format: TeamID, Name, Institution, Member1, Member2, ...)')
+    parser_init.add_argument('--pairing-scheme', choices=['high-low', 'high-high', 'random'], default='high-low', help='Swiss pairing scheme for power-matched rounds (default: high-low)')
+    parser_init.add_argument('--teams', '--names', dest='teams_file', type=str, help='File containing team info (format: TeamID, Name, Institution, Member1, Member2, ...)')
     parser_init.add_argument('--judges', type=str, help='File containing judge info (format: JudgeID, Name, Institution)')
     parser_init.add_argument('--force', action='store_true', help='Overwrite existing tournament')
     
     # Pair
     parser_pair = subparsers.add_parser("pair", help="Generate pairings")
     parser_pair.add_argument("round", type=int, help="Round number to pair")
+    parser_pair.add_argument("--pairing-scheme", "--scheme", choices=['high-low', 'high-high', 'random'], default=None, help="Pairing mode for this round (default: use tournament setting)")
     
     # Report
     parser_report = subparsers.add_parser("report", help="Report results")

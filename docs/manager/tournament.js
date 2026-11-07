@@ -22,6 +22,8 @@ class Team {
         this.break_seed = null; // Seed for elimination rounds
         // Speaker points history: array of {round: number, points: [number, number]}
         this.speaker_points_history = [];
+        this.pulled_up_rounds = []; // Rounds in which this team was pulled up to a higher bracket
+        this.bye_rounds = []; // Rounds in which this team received a BYE
     }
 }
 
@@ -326,7 +328,7 @@ class TournamentManager {
 
     // Initialize new tournament
     // teamDetails: array of {name, institution, members: [{name}, {name}]}
-    async init(numTeams, numPrelimRounds, numElimRounds, teamDetails = []) {
+    async init(numTeams, numPrelimRounds, numElimRounds, teamDetails = [], pairingScheme = 'high-low') {
         const backend = this.getEffectiveBackendUrl();
         if (backend) {
             // Cloud Mode
@@ -338,6 +340,7 @@ class TournamentManager {
                         num_teams: numTeams,
                         rounds: numPrelimRounds,
                         elim_rounds: numElimRounds,
+                        pairing_scheme: pairingScheme,
                         teams: teamDetails // We might need to update backend to accept team details
                     })
                 });
@@ -400,7 +403,8 @@ class TournamentManager {
                 num_teams: numTeams,
                 num_prelim_rounds: numPrelimRounds,
                 num_elim_rounds: numElimRounds,
-                num_rounds: numPrelimRounds + numElimRounds // Total rounds
+                num_rounds: numPrelimRounds + numElimRounds, // Total rounds
+                pairing_scheme: pairingScheme
             },
             current_round: 0,
             rounds: Array.from({ length: numPrelimRounds + numElimRounds }, (_, i) => ({ round_num: i + 1 })),
@@ -455,7 +459,8 @@ class TournamentManager {
     }
 
     // Generate pairings for a round using Swiss system
-    async pairRound(roundNum) {
+    async pairRound(roundNum, pairingScheme = null) {
+        const effectiveScheme = pairingScheme || (this.data && this.data.config && this.data.config.pairing_scheme) || 'high-low';
         const backend = this.getEffectiveBackendUrl();
         if (backend) {
             // Cloud Mode
@@ -463,7 +468,7 @@ class TournamentManager {
                 const response = await fetch(`${backend}/api/t/${this.tournamentId}/pair`, {
                     method: 'POST',
                     headers: this.getAuthHeaders(),
-                    body: JSON.stringify({ round: roundNum })
+                    body: JSON.stringify({ round: roundNum, pairing_scheme: effectiveScheme })
                 });
 
                 if (response.ok) {
@@ -474,7 +479,13 @@ class TournamentManager {
                         this.data.matches = this.data.matches.concat(result.matches);
                         this.data.current_round = roundNum;
                         if (!this.data.rounds) this.data.rounds = [];
-                        this.data.rounds.push(result.matches.map(m => m.match_id));
+                        const roundInfo = { round_num: roundNum, pairing_scheme: effectiveScheme, match_ids: result.matches.map(m => m.match_id) };
+                        const existingIdx = this.data.rounds.findIndex(r => (typeof r === 'object' && r.round_num === roundNum) || r === roundNum);
+                        if (existingIdx >= 0) {
+                            this.data.rounds[existingIdx] = roundInfo;
+                        } else {
+                            this.data.rounds.push(roundInfo);
+                        }
                         console.log('Merged pair result. matches now:', this.data.matches.length);
 
                         // Update local storage so refreshes see it
@@ -515,7 +526,7 @@ class TournamentManager {
         // Generate pairings
         let pairs;
         if (roundNum <= this.data.config.num_prelim_rounds) {
-            pairs = this.generateSwissPairings(roundNum);
+            pairs = this.generateSwissPairings(roundNum, effectiveScheme);
         } else {
             pairs = this.generateElimPairings(roundNum);
         }
@@ -523,23 +534,54 @@ class TournamentManager {
         // Create match objects
         const newMatches = [];
         for (const [aff, neg] of pairs) {
-            const match = {
-                match_id: this.data.next_match_id++,
-                round_num: roundNum,
-                aff_id: aff.id,
-                neg_id: neg.id,
-                aff_name: aff.name,
-                neg_name: neg.name,
-                result: null,
-                judge_id: null
-            };
-            this.data.matches.push(match);
-            newMatches.push(match);
+            if (!neg) {
+                // Tabroom BYE match
+                const match = {
+                    match_id: this.data.next_match_id++,
+                    round_num: roundNum,
+                    aff_id: aff.id,
+                    neg_id: -1,
+                    aff_name: aff.name,
+                    neg_name: "BYE",
+                    result: 'A',
+                    judge_id: null,
+                    is_bye: true
+                };
+                this.data.matches.push(match);
+                newMatches.push(match);
+            } else {
+                const match = {
+                    match_id: this.data.next_match_id++,
+                    round_num: roundNum,
+                    aff_id: aff.id,
+                    neg_id: neg.id,
+                    aff_name: aff.name,
+                    neg_name: neg.name,
+                    result: null,
+                    judge_id: null
+                };
+                this.data.matches.push(match);
+                newMatches.push(match);
+            }
+        }
+
+        if (!this.data.rounds) this.data.rounds = [];
+        const roundInfo = { round_num: roundNum, pairing_scheme: effectiveScheme, match_ids: newMatches.map(m => m.match_id) };
+        const existingIdx = this.data.rounds.findIndex(r => (typeof r === 'object' && r.round_num === roundNum) || r === roundNum);
+        if (existingIdx >= 0) {
+            this.data.rounds[existingIdx] = roundInfo;
+        } else {
+            this.data.rounds.push(roundInfo);
         }
 
         // Update pairing file content
         for (const m of newMatches) {
             this.data.pairing_file_content += `${m.round_num} ${m.match_id} ${m.aff_id} ${m.neg_id}\n`;
+        }
+
+        // If any matches have immediate results (e.g. BYE), recalculate stats
+        if (newMatches.some(m => m.result !== null)) {
+            this.recalculateStats();
         }
 
         this.saveToStorage();
@@ -1276,14 +1318,23 @@ class TournamentManager {
     }
 
     // Swiss pairing algorithm – mirrors the Python `pair_round` logic
-    generateSwissPairings(roundNum) {
-        const teams = [...this.teams];
+    generateSwissPairings(roundNum, pairingScheme = null) {
+        let teams = [...this.teams];
 
         // Update Buchholz before pairing (Python does this)
         this.updateBuchholz();
 
+        // Tabroom Bye Selection if odd number of teams
+        let byeTeam = null;
+        if (teams.length % 2 !== 0) {
+            byeTeam = this.selectByeTeam(teams, roundNum);
+            teams = teams.filter(t => t.id !== byeTeam.id);
+        }
+
         // Shuffle teams first to randomize order within groups
         this.shuffleArray(teams);
+
+        const effectiveScheme = pairingScheme || (this.data && this.data.config && this.data.config.pairing_scheme) || 'high-low';
 
         // Group by score
         const scoreGroups = {};
@@ -1301,6 +1352,45 @@ class TournamentManager {
 
         const sortedScores = Object.keys(scoreGroups).map(Number).sort((a, b) => b - a);
 
+        // Tabroom Pull-Up Resolution for power-matched rounds:
+        // Walk brackets from highest score to lowest. If a bracket has an odd count,
+        // pull up the best candidate from the lower bracket(s) based on worst average opponent seed
+        if (roundNum > 2 && effectiveScheme !== 'random') {
+            for (const score of sortedScores) {
+                scoreGroups[score].sort((a, b) => {
+                    const aSp = this.getTeamSpeakerPoints(a);
+                    const bSp = this.getTeamSpeakerPoints(b);
+                    if (bSp !== aSp) return bSp - aSp;
+                    if (b.buchholz !== a.buchholz) return b.buchholz - a.buchholz;
+                    return a.id - b.id;
+                });
+            }
+
+            for (let i = 0; i < sortedScores.length - 1; i++) {
+                const currScore = sortedScores[i];
+                const currGroup = scoreGroups[currScore];
+
+                if (currGroup.length % 2 !== 0) {
+                    const topSeed = currGroup[0];
+                    for (let j = i + 1; j < sortedScores.length; j++) {
+                        const lowerScore = sortedScores[j];
+                        const lowerGroup = scoreGroups[lowerScore];
+                        if (!lowerGroup || lowerGroup.length === 0) continue;
+
+                        const chosen = this.selectPullUpTeam(topSeed, lowerGroup, roundNum);
+                        if (chosen) {
+                            const [pulledTeam] = lowerGroup.splice(chosen.originalIndex, 1);
+                            if (!pulledTeam.pulled_up_rounds) pulledTeam.pulled_up_rounds = [];
+                            pulledTeam.pulled_up_rounds.push(roundNum);
+                            // Append as lowest seed of current group so top seed hits pull-up in High-Low
+                            currGroup.push(pulledTeam);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         const pairs = [];
         let floaters = [];
 
@@ -1312,21 +1402,23 @@ class TournamentManager {
             floaters = [];
 
             // Sort within bracket
-            if (roundNum > 2) {
-                // Rounds 3+: Sort by Buchholz descending
-                // Python: (score, buchholz, -true_rank).
+            if (roundNum > 2 && effectiveScheme !== 'random') {
+                // Rounds 3+: Tabroom ranks teams by Speaker Points (if available), then Buchholz
                 group.sort((a, b) => {
+                    const aSp = this.getTeamSpeakerPoints(a);
+                    const bSp = this.getTeamSpeakerPoints(b);
+                    if (bSp !== aSp) return bSp - aSp;
                     if (b.buchholz !== a.buchholz) return b.buchholz - a.buchholz;
                     return a.id - b.id; // Stable tiebreaker
                 });
             }
-            // Rounds 1-2: Keep shuffled order (random)
+            // Rounds 1-2 or 'random': Keep shuffled order (random)
 
             while (group.length > 0) {
                 const t1 = group.shift();
 
                 // Find best opponent
-                const { opponent, index, isSwappable } = this.findBestOpponent(t1, group);
+                const { opponent, index, isSwappable } = this.findBestOpponent(t1, group, effectiveScheme);
 
                 if (opponent) {
                     group.splice(index, 1);
@@ -1349,10 +1441,15 @@ class TournamentManager {
             }
             // If one team remains, give a bye
             if (floaters.length === 1) {
-                const byeTeam = floaters[0];
-                byeTeam.score += 1;
-                byeTeam.opponents.push(-1);
+                const fBye = floaters[0];
+                fBye.score += 1;
+                fBye.opponents.push(-1);
+                pairs.push([fBye, null]);
             }
+        }
+
+        if (byeTeam) {
+            pairs.push([byeTeam, null]);
         }
 
         return pairs;
@@ -1509,6 +1606,130 @@ class TournamentManager {
         return match_pairs;
     }
 
+    // Helper: Select the best team to pull up from lower bracket to face higher bracket's top seed
+    // Implements Tabroom rule: "Worst average opponent seed" (lowest Buchholz / easiest schedule so far)
+    // with constraints: no repeat opponent with top seed, no same-school clash, side compatibility, no repeat pull-up.
+    selectPullUpTeam(topSeed, lowerBracketTeams, roundNum) {
+        if (!lowerBracketTeams || lowerBracketTeams.length === 0) return null;
+
+        const t1Inst = (topSeed.institution || '').trim().toLowerCase();
+        const hasT1Inst = t1Inst && t1Inst !== 'unknown' && t1Inst !== 'none';
+        const topSeedPref = this.calculateSidePreference(topSeed);
+
+        const eligible = [];
+        for (let i = 0; i < lowerBracketTeams.length; i++) {
+            const cand = lowerBracketTeams[i];
+            if (!topSeed.opponents.includes(cand.id)) {
+                eligible.push({ team: cand, originalIndex: i });
+            }
+        }
+
+        if (eligible.length === 0) {
+            // Check swappable repeat if no non-repeat exists
+            for (let i = 0; i < lowerBracketTeams.length; i++) {
+                const cand = lowerBracketTeams[i];
+                const hist = topSeed.side_history[cand.id] || [];
+                if (!hist.includes('Aff') || !hist.includes('Neg')) {
+                    eligible.push({ team: cand, originalIndex: i });
+                }
+            }
+        }
+
+        if (eligible.length === 0) return null;
+
+        eligible.sort((a, b) => {
+            const teamA = a.team;
+            const teamB = b.team;
+
+            // 1. Repeat pull-up check
+            const pullsA = (teamA.pulled_up_rounds || []).length;
+            const pullsB = (teamB.pulled_up_rounds || []).length;
+            if (pullsA !== pullsB) return pullsA - pullsB;
+
+            // 2. School conflict check
+            const instA = (teamA.institution || '').trim().toLowerCase();
+            const instB = (teamB.institution || '').trim().toLowerCase();
+            const clashA = hasT1Inst && instA && instA !== 'unknown' && instA === t1Inst ? 1 : 0;
+            const clashB = hasT1Inst && instB && instB !== 'unknown' && instB === t1Inst ? 1 : 0;
+            if (clashA !== clashB) return clashA - clashB;
+
+            // 3. Side compatibility check
+            const prefA = this.calculateSidePreference(teamA);
+            const prefB = this.calculateSidePreference(teamB);
+            const sideClashA = (topSeedPref > 0 && prefA > 0) || (topSeedPref < 0 && prefA < 0) ? 1 : 0;
+            const sideClashB = (topSeedPref > 0 && prefB > 0) || (topSeedPref < 0 && prefB < 0) ? 1 : 0;
+            if (sideClashA !== sideClashB) return sideClashA - sideClashB;
+
+            // 4. Worst average opponent seed (lowest Buchholz = faced weakest opposition so far)
+            if (teamA.buchholz !== teamB.buchholz) return teamA.buchholz - teamB.buchholz;
+
+            // 5. Lowest speaker points
+            const spA = this.getTeamSpeakerPoints(teamA);
+            const spB = this.getTeamSpeakerPoints(teamB);
+            if (spA !== spB) return spA - spB;
+
+            return teamA.id - teamB.id;
+        });
+
+        return eligible[0];
+    }
+
+    // Select the best team to receive a BYE for an odd-numbered field
+    // Following Tabroom rules:
+    // - Single bye constraint: Team must not have already received a bye in preliminary rounds
+    // - In Rounds 1-2 (preset/random): selected at random among eligible teams
+    // - In Rounds 3+ (power-matched): selected from the lowest score bracket,
+    //   specifically the lowest-seeded team (lowest score, lowest speaker points, lowest Buchholz)
+    selectByeTeam(teams, roundNum) {
+        if (!teams || teams.length === 0) return null;
+
+        const eligible = teams.filter(t => 
+            (!t.bye_rounds || t.bye_rounds.length === 0) &&
+            (!t.opponents || !t.opponents.includes(-1))
+        );
+
+        const candidates = eligible.length > 0 ? eligible : [...teams];
+
+        if (roundNum <= 2) {
+            const idx = Math.floor(Math.random() * candidates.length);
+            return candidates[idx];
+        }
+
+        // Power-matched rounds (Rounds 3+):
+        // Lowest score bracket first, then lowest speaker points, lowest Buchholz
+        candidates.sort((a, b) => {
+            if (a.score !== b.score) return a.score - b.score;
+            const spA = this.getTeamSpeakerPoints(a);
+            const spB = this.getTeamSpeakerPoints(b);
+            if (spA !== spB) return spA - spB;
+            if (a.buchholz !== b.buchholz) return a.buchholz - b.buchholz;
+            return b.id - a.id;
+        });
+
+        return candidates[0];
+    }
+
+    // Helper: calculate total preliminary speaker points for a team (with Tabroom bye average imputation)
+    getTeamSpeakerPoints(team) {
+        if (!team || !team.speaker_points_history || team.speaker_points_history.length === 0) return 0;
+        const maxPrelim = (this.data && this.data.config && this.data.config.num_prelim_rounds) || 999;
+        const entries = team.speaker_points_history.filter(entry => entry.round <= maxPrelim);
+        if (entries.length === 0) return 0;
+
+        const sumPts = entries.reduce((sum, entry) => {
+            const pts = (entry.points || []).reduce((s, p) => s + (typeof p === 'number' ? p : 0), 0);
+            return sum + pts;
+        }, 0);
+
+        const byeCount = (team.bye_rounds || []).filter(r => r <= maxPrelim).length;
+        if (byeCount > 0 && entries.length > 0) {
+            const avgPerRound = sumPts / entries.length;
+            return sumPts + (avgPerRound * byeCount);
+        }
+
+        return sumPts;
+    }
+
     // Helper: Calculate side preference score
     calculateSidePreference(team) {
         let pref = team.neg_count - team.aff_count;
@@ -1520,22 +1741,42 @@ class TournamentManager {
         return pref;
     }
 
-    // Helper: Find best opponent
-    findBestOpponent(t1, group) {
+    // Helper: Find best opponent (Tabroom High-Low / High-High with school protection)
+    findBestOpponent(t1, group, pairingScheme = 'high-low') {
+        let bestNonRepeatDiffSchool = null;
+        let bestNonRepeatDiffSchoolIdx = -1;
+
         let bestNonRepeat = null;
         let bestNonRepeatIdx = -1;
 
         let bestSwappable = null;
         let bestSwappableIdx = -1;
 
-        for (let i = 0; i < group.length; i++) {
+        const isHighLow = pairingScheme === 'high-low';
+        const start = isHighLow ? group.length - 1 : 0;
+        const end = isHighLow ? -1 : group.length;
+        const step = isHighLow ? -1 : 1;
+
+        const t1Inst = (t1.institution || '').trim().toLowerCase();
+        const hasT1Inst = t1Inst && t1Inst !== 'unknown' && t1Inst !== 'none';
+
+        for (let i = start; i !== end; i += step) {
             const candidate = group[i];
 
             if (!t1.opponents.includes(candidate.id)) {
-                // Priority 1: Non-repeat
-                bestNonRepeat = candidate;
-                bestNonRepeatIdx = i;
-                break; // Strict Swiss: take first valid
+                const candInst = (candidate.institution || '').trim().toLowerCase();
+                const sameSchool = hasT1Inst && candInst && candInst !== 'unknown' && candInst !== 'none' && candInst === t1Inst;
+
+                if (!sameSchool && bestNonRepeatDiffSchool === null) {
+                    bestNonRepeatDiffSchool = candidate;
+                    bestNonRepeatDiffSchoolIdx = i;
+                    break; // Found ideal matchup (different school + non-repeat)
+                }
+
+                if (bestNonRepeat === null) {
+                    bestNonRepeat = candidate;
+                    bestNonRepeatIdx = i;
+                }
             } else {
                 // Check for swappable repeat
                 if (bestSwappable === null) {
@@ -1551,7 +1792,9 @@ class TournamentManager {
             }
         }
 
-        if (bestNonRepeat) {
+        if (bestNonRepeatDiffSchool) {
+            return { opponent: bestNonRepeatDiffSchool, index: bestNonRepeatDiffSchoolIdx, isSwappable: false };
+        } else if (bestNonRepeat) {
             return { opponent: bestNonRepeat, index: bestNonRepeatIdx, isSwappable: false };
         } else if (bestSwappable) {
             return { opponent: bestSwappable, index: bestSwappableIdx, isSwappable: true };
@@ -1746,6 +1989,7 @@ class TournamentManager {
             team.last_side = null;
             team.side_history = {};
             team.speaker_points_history = []; // Rebuild from matches
+            team.bye_rounds = [];
         }
 
         // Calculate from matches
@@ -1754,9 +1998,20 @@ class TournamentManager {
 
         for (const match of sortedMatches) {
             const affTeam = this.teams.find(t => t.id === match.aff_id);
-            const negTeam = this.teams.find(t => t.id === match.neg_id);
+            if (!affTeam) continue;
 
-            if (!affTeam || !negTeam) continue;
+            // Handle BYE match
+            if (match.is_bye || match.neg_id === -1) {
+                affTeam.wins++;
+                affTeam.score++;
+                affTeam.opponents.push(-1);
+                if (!affTeam.bye_rounds) affTeam.bye_rounds = [];
+                affTeam.bye_rounds.push(match.round_num);
+                continue;
+            }
+
+            const negTeam = this.teams.find(t => t.id === match.neg_id);
+            if (!negTeam) continue;
 
             // Rebuild speaker points history
             if (match.speaker_points) {
@@ -1979,6 +2234,15 @@ class TournamentManager {
                     .map(entry => entry.points[memberIdx])
                     .filter(p => p !== undefined && p !== null);
 
+                // Tabroom bye rule: impute member's average points for each bye round
+                const byeCount = (team.bye_rounds || []).filter(r => r <= this.data.config.num_prelim_rounds).length;
+                if (byeCount > 0 && prelimPoints.length > 0) {
+                    const avg = prelimPoints.reduce((sum, p) => sum + p, 0) / prelimPoints.length;
+                    for (let b = 0; b < byeCount; b++) {
+                        prelimPoints.push(avg);
+                    }
+                }
+
                 if (prelimPoints.length === 0) continue; // Skip if no points recorded
 
                 let adjustedScore = 0;
@@ -2062,7 +2326,9 @@ class TournamentManager {
                 last_side: t.last_side,
                 side_history: t.side_history,
                 break_seed: t.break_seed,
-                speaker_points_history: t.speaker_points_history
+                speaker_points_history: t.speaker_points_history,
+                pulled_up_rounds: t.pulled_up_rounds || [],
+                bye_rounds: t.bye_rounds || []
             })),
             judges: this.judges.map(j => ({
                 id: j.id,
@@ -2104,6 +2370,8 @@ class TournamentManager {
             team.side_history = t.side_history || {};
             team.break_seed = t.break_seed || null;
             team.speaker_points_history = t.speaker_points_history || [];
+            team.pulled_up_rounds = t.pulled_up_rounds || [];
+            team.bye_rounds = t.bye_rounds || [];
             return team;
         });
 

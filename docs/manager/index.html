@@ -86,6 +86,16 @@
                     <input type="number" id="numElimRounds" min="0" max="10" value="0" required>
                 </div>
                 <div class="form-group">
+                    <label for="pairingScheme">Pairing Scheme (Power-Matched Rounds 3+):</label>
+                    <select id="pairingScheme" style="width: 100%; padding: 0.5rem; border: 1px solid var(--border-color, #ccc); border-radius: 4px; background: var(--bg-card, #fff); color: var(--text-color, #333);">
+                        <option value="high-low" selected>High-Low (Standard Tabroom Hi/Lo)</option>
+                        <option value="high-high">High-High (Adjacent / Strong vs Strong)</option>
+                    </select>
+                    <small style="display: block; margin-top: 4px; color: var(--text-muted); font-size: 0.85rem;">
+                        High-Low pairs top seeds against bottom seeds within each win bracket (with school protection).
+                    </small>
+                </div>
+                <div class="form-group">
                     <label for="teamData">Team Details (Format: Team Name | Institution | Member 1 | Member 1 Email | Member 2 | Member 2 Email):</label>
                     <textarea id="teamData" rows="10"
                         placeholder="Team A | University X | Alice Smith | alice@x.edu | Bob Jones | bob@x.edu&#10;Team B | College Y | Carol White | carol@y.edu | David Brown | david@y.edu&#10;..."></textarea>
@@ -125,6 +135,29 @@
                 <!-- Populated by JS -->
             </div>
         </section>
+    </div>
+
+    <!-- Pair Round Modal -->
+    <div id="pairRoundModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 500px;">
+            <h3 id="pairRoundModalTitle">Pair Next Round</h3>
+            <p id="pairRoundModalDesc" style="color: var(--text-muted); margin-bottom: 1rem;"></p>
+            <div id="pairRoundSchemeGroup" class="form-group">
+                <label for="roundPairingSchemeSelect"><strong>Pairing Mode for this Round:</strong></label>
+                <select id="roundPairingSchemeSelect" style="width: 100%; padding: 0.6rem; border: 1px solid var(--border-color, #ccc); border-radius: 4px; background: var(--bg-card, #fff); color: var(--text-color, #333); font-size: 1rem;">
+                    <option value="high-low">High-Low (Standard Tabroom Hi/Lo)</option>
+                    <option value="high-high">High-High (Adjacent / Strong vs Strong)</option>
+                    <option value="random">Random Draw (Preset)</option>
+                </select>
+                <small id="roundPairingSchemeHint" style="display: block; margin-top: 6px; color: var(--text-muted); font-size: 0.85rem; line-height: 1.4;">
+                    Matches highest seed vs lowest seed within each win-loss bracket.
+                </small>
+            </div>
+            <div class="modal-actions" style="margin-top: 1.5rem; display: flex; justify-content: flex-end; gap: 0.5rem;">
+                <button id="cancelPairRoundBtn" type="button" class="btn btn-secondary">Cancel</button>
+                <button id="confirmPairRoundBtn" type="button" class="btn btn-primary">Generate Pairings</button>
+            </div>
+        </div>
     </div>
 
     <!-- Generic Confirmation Modal -->
@@ -232,8 +265,8 @@
 
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="tournament.js?v=24"></script>
-    <script src="app.js?v=24"></script>
+    <script src="tournament.js?v=27"></script>
+    <script src="app.js?v=27"></script>
 </body>
 
 </html>

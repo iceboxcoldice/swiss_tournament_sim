@@ -24,6 +24,10 @@ class Team:
     institution: Optional[str] = None # Team institution
     # Speaker points history: list of dicts {round: int, points: [float, float]}
     speaker_points_history: list = field(default_factory=list) 
+    # Rounds in which this team was pulled up to a higher bracket
+    pulled_up_rounds: list = field(default_factory=list) 
+    # Rounds in which this team received a BYE
+    bye_rounds: list = field(default_factory=list) 
  
 
 
@@ -104,25 +108,42 @@ def calculate_side_preference(team: Team) -> float:
         pref -= 2.0
     return pref
 
-def find_best_opponent(t1: Team, group: List[Team]) -> Tuple[Optional[Team], int, bool]:
+def find_best_opponent(t1: Team, group: List[Team], pairing_scheme: str = 'high-low') -> Tuple[Optional[Team], int, bool]:
     """
     Find best opponent for t1 in the group.
     Returns (opponent, index, is_swappable_repeat).
+    In High-Low (Tabroom standard): searches candidates starting from the lowest-seeded in group.
+    In High-High: searches candidates starting from the highest-seeded in group.
+    Includes institution protection (avoids pairing teams from same school if possible).
     """
-    t1_pref = calculate_side_preference(t1)
-    
+    best_non_repeat_diff_school = None
+    best_non_repeat_diff_school_idx = -1
+
     best_non_repeat = None
     best_non_repeat_idx = -1
     
     best_swappable = None
     best_swappable_idx = -1
+
+    t1_inst = (getattr(t1, 'institution', None) or '').strip().lower()
+    has_t1_inst = bool(t1_inst and t1_inst not in ('unknown', 'none', ''))
+
+    indices = range(len(group) - 1, -1, -1) if pairing_scheme == 'high-low' else range(len(group))
     
-    for i, candidate in enumerate(group):
+    for i in indices:
+        candidate = group[i]
         if candidate.id not in t1.opponent_history:
-            # Priority 1: Non-repeat
-            best_non_repeat = candidate
-            best_non_repeat_idx = i
-            break # Strict Swiss: take first valid
+            cand_inst = (getattr(candidate, 'institution', None) or '').strip().lower()
+            same_school = has_t1_inst and bool(cand_inst and cand_inst not in ('unknown', 'none', '') and cand_inst == t1_inst)
+
+            if not same_school and best_non_repeat_diff_school is None:
+                best_non_repeat_diff_school = candidate
+                best_non_repeat_diff_school_idx = i
+                break # Found ideal high-low matchup
+
+            if best_non_repeat is None:
+                best_non_repeat = candidate
+                best_non_repeat_idx = i
         else:
             # Check for swappable repeat
             if best_swappable is None:
@@ -133,12 +154,119 @@ def find_best_opponent(t1: Team, group: List[Team]) -> Tuple[Optional[Team], int
                     best_swappable = candidate
                     best_swappable_idx = i
     
-    if best_non_repeat:
+    if best_non_repeat_diff_school:
+        return best_non_repeat_diff_school, best_non_repeat_diff_school_idx, False
+    elif best_non_repeat:
         return best_non_repeat, best_non_repeat_idx, False
     elif best_swappable:
         return best_swappable, best_swappable_idx, True
         
     return None, -1, False
+
+def get_speaker_points(team: Team) -> float:
+    """Helper to sum speaker points for tiebreaking/ranking, with Tabroom bye average imputation."""
+    if not team or not getattr(team, 'speaker_points_history', None):
+        return 0.0
+    total = 0.0
+    debated_rounds = 0
+    for entry in team.speaker_points_history:
+        if isinstance(entry, dict):
+            pts = entry.get('points', [])
+            p_sum = sum(p for p in pts if isinstance(p, (int, float)))
+            total += p_sum
+            debated_rounds += 1
+        elif isinstance(entry, (list, tuple)):
+            p_sum = sum(p for p in entry if isinstance(p, (int, float)))
+            total += p_sum
+            debated_rounds += 1
+        elif isinstance(entry, (int, float)):
+            total += entry
+            debated_rounds += 1
+
+    bye_count = len(getattr(team, 'bye_rounds', []) or [])
+    if bye_count > 0 and debated_rounds > 0:
+        avg_per_round = total / debated_rounds
+        total += avg_per_round * bye_count
+
+    return total
+
+def select_bye_team(teams: List[Team], round_num: int) -> Team:
+    """
+    Selects the team to receive a BYE for the round following Tabroom rules:
+    - Team must not have already received a bye in preliminary rounds (single bye rule).
+    - In Rounds 1-2 (preset/random, round_num <= 1 in 0-indexed): selected at random among eligible teams.
+    - In Rounds 3+ (power-matched, round_num > 1 in 0-indexed): selected from the lowest score bracket,
+      specifically the lowest-seeded team (lowest score, lowest speaker points, lowest Buchholz).
+    """
+    eligible = [
+        t for t in teams
+        if not getattr(t, 'bye_rounds', None) and -1 not in getattr(t, 'opponent_history', [])
+    ]
+    if not eligible:
+        eligible = list(teams)
+
+    if round_num <= 1:
+        idx = int(lcg_random() * len(eligible)) if eligible else 0
+        return eligible[idx]
+
+    eligible.sort(
+        key=lambda t: (
+            t.score,
+            get_speaker_points(t),
+            getattr(t, 'buchholz', 0.0),
+            -t.id
+        )
+    )
+    return eligible[0]
+
+def select_pull_up_team(top_seed: Team, lower_bracket_teams: List[Team], round_num: int) -> Optional[Tuple[Team, int]]:
+    """
+    Select the best team to pull up from lower bracket to face the higher bracket's top seed.
+    Implements Tabroom rule: 'Worst average opponent seed' (lowest Buchholz / easiest schedule so far)
+    with constraints: no repeat opponent, no same-school clash, side compatibility, no repeat pull-up.
+    Returns (chosen_team, original_index) or None.
+    """
+    if not lower_bracket_teams:
+        return None
+
+    t1_inst = (getattr(top_seed, 'institution', None) or '').strip().lower()
+    has_t1_inst = bool(t1_inst and t1_inst not in ('unknown', 'none', ''))
+    top_seed_pref = calculate_side_preference(top_seed)
+
+    eligible = []
+    for i, cand in enumerate(lower_bracket_teams):
+        if cand.id not in top_seed.opponent_history:
+            eligible.append((cand, i))
+
+    if not eligible:
+        # Check swappable repeat if no non-repeat exists
+        for i, cand in enumerate(lower_bracket_teams):
+            hist = top_seed.side_history.get(cand.id, [])
+            if 'Aff' not in hist or 'Neg' not in hist:
+                eligible.append((cand, i))
+
+    if not eligible:
+        return None
+
+    def sort_key(item):
+        team, _ = item
+        pulls = len(getattr(team, 'pulled_up_rounds', []))
+        
+        cand_inst = (getattr(team, 'institution', None) or '').strip().lower()
+        same_school = 1 if (has_t1_inst and cand_inst and cand_inst not in ('unknown', 'none', '') and cand_inst == t1_inst) else 0
+        
+        cand_pref = calculate_side_preference(team)
+        side_clash = 1 if ((top_seed_pref > 0 and cand_pref > 0) or (top_seed_pref < 0 and cand_pref < 0)) else 0
+        
+        # Tabroom 'Worst average opponent seed' = lowest buchholz (faced weakest opposition so far)
+        buchholz = getattr(team, 'buchholz', 0.0)
+        sp = get_speaker_points(team)
+        score = getattr(team, 'score', 0.0)
+        
+        return (pulls, same_school, side_clash, buchholz, sp, score, team.id)
+
+    eligible.sort(key=sort_key)
+    return eligible[0]
 
 def determine_sides(t1: Team, t2: Team, is_swappable: bool) -> Tuple[Team, Team]:
     """
@@ -184,9 +312,10 @@ def update_buchholz(teams: List[Team]):
                     buchholz += opp.score
         t.buchholz = buchholz
 
-def pair_round(teams: List[Team], round_num: int, use_buchholz: bool = False) -> List[Tuple[Team, Team]]:
+def pair_round(teams: List[Team], round_num: int, use_buchholz: bool = False, pairing_scheme: str = 'high-low') -> List[Tuple[Team, Team]]:
     """
     Pair teams for a round using Swiss system with floating and side constraints.
+    Supports Tabroom 'high-low' (default) and 'high-high' pairing schemes.
     Returns list of (Aff, Neg) tuples.
     """
     # Update Buchholz before pairing to use for sorting
@@ -196,6 +325,13 @@ def pair_round(teams: List[Team], round_num: int, use_buchholz: bool = False) ->
     # Create a copy for pairing to avoid mutating original list order
     # (Matches JS behavior where it shuffles a [...teams] copy)
     teams_to_pair = list(teams)
+
+    # Tabroom Bye Resolution if odd number of teams
+    bye_team = None
+    if len(teams_to_pair) % 2 != 0:
+        bye_team = select_bye_team(teams_to_pair, round_num)
+        teams_to_pair = [t for t in teams_to_pair if t.id != bye_team.id]
+
     manual_shuffle(teams_to_pair)
     
     
@@ -213,6 +349,39 @@ def pair_round(teams: List[Team], round_num: int, use_buchholz: bool = False) ->
 
     sorted_scores = sorted(score_groups.keys(), reverse=True)
 
+    # Tabroom Pull-Up Resolution for power-matched rounds:
+    # If a bracket has an odd count, pull up the best candidate from lower bracket(s)
+    # based on worst average opponent seed (lowest Buchholz / easiest schedule)
+    if round_num > 1 and pairing_scheme != 'random':
+        for score in sorted_scores:
+            if use_buchholz:
+                score_groups[score].sort(key=lambda t: (t.score, get_speaker_points(t), t.buchholz, -t.id), reverse=True)
+            else:
+                score_groups[score].sort(key=lambda t: (t.score, get_speaker_points(t), -t.id), reverse=True)
+
+        for i in range(len(sorted_scores) - 1):
+            curr_score = sorted_scores[i]
+            curr_group = score_groups[curr_score]
+
+            if len(curr_group) % 2 != 0:
+                top_seed = curr_group[0]
+                for j in range(i + 1, len(sorted_scores)):
+                    lower_score = sorted_scores[j]
+                    lower_group = score_groups[lower_score]
+                    if not lower_group:
+                        continue
+
+                    chosen = select_pull_up_team(top_seed, lower_group, round_num + 1)
+                    if chosen:
+                        pulled_team, orig_idx = chosen
+                        lower_group.pop(orig_idx)
+                        if not hasattr(pulled_team, 'pulled_up_rounds'):
+                            pulled_team.pulled_up_rounds = []
+                        pulled_team.pulled_up_rounds.append(round_num + 1)
+                        # Append as lowest seed of current group so top seed hits pull-up in High-Low
+                        curr_group.append(pulled_team)
+                        break
+
     round_pairs = []
     floaters = []
     
@@ -223,20 +392,20 @@ def pair_round(teams: List[Team], round_num: int, use_buchholz: bool = False) ->
         floaters = []
         
         # Sort by rank (or random if preferred, but usually rank is used for pairing order)
-        # For Round 1 and 2, we want random pairing, so we skip the sort
+        # For Round 1 and 2, or if pairing_scheme == 'random', we want random pairing, so we skip the sort
         # (teams are already shuffled)
-        if round_num > 1:
+        if round_num > 1 and pairing_scheme != 'random':
             # If true_rank is 0 (real tournament), it won't affect sorting much, 
             # effectively random within score/buchholz groups due to initial shuffle.
             if use_buchholz:
-                group.sort(key=lambda t: (t.score, t.buchholz), reverse=True)
+                group.sort(key=lambda t: (t.score, get_speaker_points(t), t.buchholz, -t.id), reverse=True)
             else:
-                group.sort(key=lambda t: t.score, reverse=True)
+                group.sort(key=lambda t: (t.score, get_speaker_points(t), -t.id), reverse=True)
         
         while group:
             t1 = group.pop(0)
             
-            opponent, opponent_idx, is_swappable = find_best_opponent(t1, group)
+            opponent, opponent_idx, is_swappable = find_best_opponent(t1, group, pairing_scheme=pairing_scheme)
             
             if opponent:
                 group.pop(opponent_idx)
@@ -261,15 +430,27 @@ def pair_round(teams: List[Team], round_num: int, use_buchholz: bool = False) ->
             round_pairs.append((aff, neg))
                     
         if floaters:
-            # Bye
-            bye_team = floaters[0]
-            bye_team.score += 1.0
-            bye_team.wins += 1
-            bye_team.history.append("W")
-            bye_team.opponent_history.append(-1)
-            # Bye usually doesn't count for sides, or counts as free Aff? 
-            # Let's ignore side effect for bye in this sim
-            
+            # Fallback bye for remaining floater
+            f_bye = floaters[0]
+            f_bye.score += 1.0
+            f_bye.wins += 1
+            f_bye.history.append("W")
+            f_bye.opponent_history.append(-1)
+            if not hasattr(f_bye, 'bye_rounds') or f_bye.bye_rounds is None:
+                f_bye.bye_rounds = []
+            f_bye.bye_rounds.append(round_num + 1)
+            round_pairs.append((f_bye, None))
+
+    if bye_team is not None:
+        if not hasattr(bye_team, 'bye_rounds') or bye_team.bye_rounds is None:
+            bye_team.bye_rounds = []
+        bye_team.bye_rounds.append(round_num + 1)
+        bye_team.score += 1.0
+        bye_team.wins += 1
+        bye_team.history.append("W")
+        bye_team.opponent_history.append(-1)
+        round_pairs.append((bye_team, None))
+
     return round_pairs
 
 def run_tournament(
@@ -284,6 +465,9 @@ def run_tournament(
     for round_num in range(num_rounds):
         pairs = pair_round(teams, round_num, use_buchholz=use_buchholz)
         for t1, t2 in pairs:
+            if t2 is None:
+                # Bye match already scored in pair_round
+                continue
             # Debug logging
             if t1.true_rank in debug_ranks or t2.true_rank in debug_ranks:
                 print(

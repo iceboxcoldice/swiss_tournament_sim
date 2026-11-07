@@ -672,6 +672,7 @@ def init_tournament(tournament_id):
         auto_approve = not GOOGLE_OAUTH_CLIENT_ID or is_super_admin(user_email)
         status = 'approved' if auto_approve else 'pending'
 
+        pairing_scheme = req_data.get('pairing_scheme', 'high-low')
         actual_num_teams = len(teams)
         data = {
             "config": {
@@ -679,6 +680,7 @@ def init_tournament(tournament_id):
                 "num_prelim_rounds": rounds,
                 "num_elim_rounds": elim_rounds,
                 "num_rounds": rounds + elim_rounds,
+                "pairing_scheme": pairing_scheme,
             },
             "status": status,
             "is_started": False,
@@ -889,8 +891,9 @@ def assign_judge(tournament_id):
 def pair_round(tournament_id):
     """Pair the next round."""
     try:
-        req_data = request.json
+        req_data = request.json or {}
         round_num = req_data.get('round')
+        pairing_scheme = req_data.get('pairing_scheme')
         
         if not round_num:
              return jsonify({"error": "Missing round number"}), 400
@@ -908,7 +911,7 @@ def pair_round(tournament_id):
             data['is_started'] = True
 
         try:
-            pairs = tm.pair_round_logic(data, teams, round_num)
+            pairs = tm.pair_round_logic(data, teams, round_num, pairing_scheme=pairing_scheme)
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
             
@@ -916,7 +919,7 @@ def pair_round(tournament_id):
         next_match_id = data.get('next_match_id', 1)
         
         for p in pairs:
-            if len(p) == 1:
+            if len(p) == 1 or p[1] is None:
                 m = {
                     "match_id": next_match_id,
                     "round_num": round_num,
@@ -926,7 +929,8 @@ def pair_round(tournament_id):
                     "neg_name": "BYE",
                     "result": "A",
                     "judge_id": -1,
-                    "speaker_points": None
+                    "speaker_points": None,
+                    "is_bye": True
                 }
             else:
                 m = {
@@ -950,9 +954,10 @@ def pair_round(tournament_id):
         data['is_started'] = True
         
         if patched_save_tournament_with_id(data, teams, tournament_id):
+            effective_scheme = pairing_scheme or data.get('config', {}).get('pairing_scheme', 'high-low')
             log_event(
                 action="ROUND_PAIRED",
-                payload={"round_num": round_num, "matches": new_matches},
+                payload={"round_num": round_num, "matches": new_matches, "pairing_scheme": effective_scheme},
                 tournament_id=tournament_id,
                 actor=get_current_actor()
             )
@@ -989,7 +994,7 @@ def start_tournament_endpoint(tournament_id):
                 pairs = tm.pair_round_logic(data, teams_objs, 1)
                 next_match_id = data.get('next_match_id', 1)
                 for p in pairs:
-                    if len(p) == 1:
+                    if len(p) == 1 or p[1] is None:
                         m = {
                             "match_id": next_match_id,
                             "round_num": 1,
@@ -999,7 +1004,8 @@ def start_tournament_endpoint(tournament_id):
                             "neg_name": "BYE",
                             "result": "A",
                             "judge_id": -1,
-                            "speaker_points": None
+                            "speaker_points": None,
+                            "is_bye": True
                         }
                     else:
                         m = {
