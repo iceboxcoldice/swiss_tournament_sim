@@ -126,10 +126,10 @@ if [ -n "\${AUTH_MSG}" ]; then
     echo ""
 fi
 
-echo "   Waiting for backend to become healthy..."
+echo "   Waiting for backend to become healthy inside container..."
 for i in {1..20}; do
-    if curl -sf http://127.0.0.1:8081/api/health >/dev/null 2>&1; then
-        echo "   Backend is responding healthy on port 8081!"
+    if docker exec tabroom-backend python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/api/health')" >/dev/null 2>&1; then
+        echo "   Backend is responding healthy inside container!"
         exit 0
     fi
     sleep 1
@@ -156,27 +156,23 @@ fi
 
 echo ""
 echo "========================================================================"
-echo "🎉 Tabroom Backend (with Tailscale sidecar) deployed to ${TARGET_HOST}!"
+echo "🎉 Tabroom Backend (Tailscale-isolated) deployed to ${TARGET_HOST}!"
 echo "========================================================================"
 
 if [ "${SERVE_HTTPS_ACTIVE}" = "true" ]; then
-    echo "🌐 Tailscale HTTPS URL (Active with SSL - Best for GitHub Pages):"
+    echo "🌐 Tailscale HTTPS URL (Direct from tabroom2 with SSL):"
     echo "   https://${SIDECAR_DNS}"
     echo ""
     echo "👉 In Tournament Manager (⚙️ Tools ▾ -> ☁️ Cloud Backend):"
     echo "   Enter: https://${SIDECAR_DNS}"
 elif [ -n "${SIDECAR_IP}" ]; then
-    echo "🌐 Tailscale Node URL:"
+    echo "🌐 Tailscale Node URL (Encrypted inside Tailnet):"
     if [ -n "${SIDECAR_DNS}" ]; then
         echo "   http://${SIDECAR_DNS}:8081"
     fi
     echo "   http://${SIDECAR_IP}:8081"
     echo ""
-    echo "👉 In Tournament Manager (when loaded locally or over HTTP):"
+    echo "👉 In Tournament Manager:"
     echo "   Enter: http://${SIDECAR_IP}:8081"
 fi
-
-echo ""
-echo "🔗 Host Direct (LAN / Host port mapping):"
-echo "   http://${TARGET_HOST}:8081"
 echo "========================================================================"
