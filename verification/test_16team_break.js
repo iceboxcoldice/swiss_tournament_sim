@@ -12,7 +12,7 @@ const localStorageMock = (() => {
 })();
 global.localStorage = localStorageMock;
 
-const { TournamentManager } = require('../docs/manager/tournament.js');
+const { TournamentManager } = require('../frontend/manager/tournament.js');
 
 function runTest() {
     console.log("Testing 16-Team Tournament (4 Prelim + 3 Elim)...\n");

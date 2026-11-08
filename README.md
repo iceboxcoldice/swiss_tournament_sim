@@ -15,19 +15,19 @@ A collection of Python scripts to simulate **Policy Debate tournaments** using S
 **Basic Usage:**
 ```bash
 # Initialize tournament (8 teams, 4 prelim rounds, 2 elim rounds = semifinals + finals)
-./tournament_manager.py init 8 4 --elim-rounds 2 --names teams.txt
+python3 backend/tournament_manager.py init 8 4 --elim-rounds 2 --names examples/teams.txt.example
 
 # Generate pairings for round 1
-./tournament_manager.py pair 1
+python3 backend/tournament_manager.py pair 1
 
 # Report results
-./tournament_manager.py report 1 --file results.txt
+python3 backend/tournament_manager.py report 1 --file results.txt
 
 # View current standings
-./tournament_manager.py standings
+python3 backend/tournament_manager.py standings
 
 # View standings after round 2
-./tournament_manager.py standings 2
+python3 backend/tournament_manager.py standings 2
 ```
 
 
@@ -100,7 +100,7 @@ python3 win_distribution_from_true_rank.py <teams> <rounds> <true_rank> [simulat
 **Example:**
 See how many wins the 8th best team is likely to get:
 ```bash
-python3 win_distribution_from_true_rank.py 128 7 8 10000
+python3 simulation/win_distribution_from_true_rank.py 128 7 8 10000
 ```
 
 ---
@@ -110,13 +110,13 @@ Calculates the distribution of "true ranks" for teams that finish with a specifi
 
 **Usage:**
 ```bash
-python3 true_rank_distribution_from_wins.py <teams> <rounds> <wins> [simulations] [options]
+python3 simulation/true_rank_distribution_from_wins.py <teams> <rounds> <wins> [simulations] [options]
 ```
 
 **Example:**
 Analyze the strength of teams that finish with 5 wins:
 ```bash
-python3 true_rank_distribution_from_wins.py 128 7 5 10000
+python3 simulation/true_rank_distribution_from_wins.py 128 7 5 10000
 ```
 
 ---
@@ -126,13 +126,13 @@ Calculates the distribution of "true ranks" for teams that have a specific *sequ
 
 **Usage:**
 ```bash
-python3 true_rank_distribution_from_history.py <teams> <rounds> <history_string> [simulations] [options]
+python3 simulation/true_rank_distribution_from_history.py <teams> <rounds> <history_string> [simulations] [options]
 ```
 
 **Example:**
 Analyze teams that started with 2 wins, lost 1, then won 2 (partial history):
 ```bash
-python3 true_rank_distribution_from_history.py 128 7 "WWLWW" 10000
+python3 simulation/true_rank_distribution_from_history.py 128 7 "WWLWW" 10000
 ```
 
 ---
@@ -142,19 +142,19 @@ Calculates the probability of one team beating another when they have specific w
 
 **Usage:**
 ```bash
-python3 head_to_head_probability.py <teams> <rounds> <history_a> <history_b> [simulations] [options]
+python3 simulation/head_to_head_probability.py <teams> <rounds> <history_a> <history_b> [simulations] [options]
 ```
 
 **Example:**
 Calculate the probability that a team with "W W" history beats a team with "W L" history:
 ```bash
-python3 head_to_head_probability.py 128 5 "W W" "W L" 1000
+python3 simulation/head_to_head_probability.py 128 5 "W W" "W L" 1000
 ```
 
 **Adaptive Mode:**
 Omit the simulations count to automatically determine the number needed for stable results:
 ```bash
-python3 head_to_head_probability.py 128 5 "W W" "W L"
+python3 simulation/head_to_head_probability.py 128 5 "W W" "W L"
 ```
 
 Specify minimum matchups needed (default: 100):

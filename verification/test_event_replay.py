@@ -325,7 +325,7 @@ class TestEventReplay(unittest.TestCase):
         central_log = event_replay.get_event_log_path(self.test_dir)
         cmd_replay = [
             sys.executable,
-            os.path.join(PROJECT_ROOT, 'event_replay.py'),
+            os.path.join(PROJECT_ROOT, 'backend', 'event_replay.py'),
             '--replay', central_log,
             '--target', cli_target,
             '--tournament', 'cli-tournament'
@@ -337,7 +337,7 @@ class TestEventReplay(unittest.TestCase):
         # 3. Test CLI --verify against test storage directory
         cmd_verify = [
             sys.executable,
-            os.path.join(PROJECT_ROOT, 'event_replay.py'),
+            os.path.join(PROJECT_ROOT, 'backend', 'event_replay.py'),
             '--verify',
             '--storage', self.test_dir
         ]

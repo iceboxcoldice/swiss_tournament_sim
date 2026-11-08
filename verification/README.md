@@ -9,7 +9,7 @@ This directory contains regression tests and verification scripts for the Swiss 
 
 ## Running JavaScript Tests (Tournament Manager UI Logic)
 
-These tests use Node.js to verify the core logic in `docs/manager/tournament.js`. They mock `localStorage` and other browser environments to run in the terminal.
+These tests use Node.js to verify the core logic in `frontend/manager/tournament.js`. They mock `localStorage` and other browser environments to run in the terminal.
 
 ### Elimination and Bracket Tests
 ```bash

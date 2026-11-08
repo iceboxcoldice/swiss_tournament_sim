@@ -20,8 +20,18 @@ import threading
 from dataclasses import asdict
 from typing import List, Dict, Any, Callable, Tuple, Optional, Union
 
+# Ensure simulation and backend directories are accessible
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(BACKEND_DIR)
+for p in (BACKEND_DIR, PROJECT_ROOT, os.path.join(PROJECT_ROOT, 'simulation')):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
 # Import Team and pairing logic from swiss_sim
-from swiss_sim import Team, pair_round
+try:
+    from simulation.swiss_sim import Team, pair_round
+except ImportError:
+    from swiss_sim import Team, pair_round
 
 TOURNAMENT_FILE = "tournament.json"
 # Global threading lock for safe concurrent writes

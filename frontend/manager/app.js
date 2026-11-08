@@ -82,7 +82,7 @@ function isSuperAdmin() {
 }
 
 async function checkSuperAdminStatus() {
-    const backendUrl = tournament.getEffectiveBackendUrl ? tournament.getEffectiveBackendUrl() : (tournament.backendUrl || '');
+    const backendUrl = (tournament.getEffectiveBackendUrl && tournament.getEffectiveBackendUrl()) || tournament.backendUrl || '';
     if (!backendUrl || !currentUser) {
         isSuperAdminUser = false;
         return;
@@ -440,9 +440,18 @@ const savedBackendUrl = localStorage.getItem('backendUrl');
 if (savedBackendUrl && savedBackendUrl !== 'local') {
     tournament.setBackendUrl(savedBackendUrl);
     updateConnectionStatus(true);
-} else {
+} else if (savedBackendUrl === 'local') {
     tournament.disconnectBackend();
     updateConnectionStatus(false);
+} else {
+    const autoBackend = tournament.getEffectiveBackendUrl();
+    if (autoBackend) {
+        tournament.setBackendUrl(autoBackend);
+        updateConnectionStatus(true);
+    } else {
+        tournament.disconnectBackend();
+        updateConnectionStatus(false);
+    }
 }
 
 if (backendConfigBtn) {
@@ -3592,7 +3601,7 @@ window.linkSecondaryEmail = async function () {
 
     showLoading(`Linking ${email}...`);
     try {
-        const backendUrl = tournament.getEffectiveBackendUrl ? tournament.getEffectiveBackendUrl() : (tournament.backendUrl || '');
+        const backendUrl = (tournament.getEffectiveBackendUrl && tournament.getEffectiveBackendUrl()) || tournament.backendUrl || '';
         const response = await fetch(`${backendUrl}/api/user/link_email`, {
             method: 'POST',
             headers: tournament.getAuthHeaders(),
@@ -3741,7 +3750,7 @@ teamModalForm.onsubmit = async (e) => {
 
     showLoading('Saving team...');
     try {
-        const backendUrl = tournament.getEffectiveBackendUrl ? tournament.getEffectiveBackendUrl() : (tournament.backendUrl || '');
+        const backendUrl = (tournament.getEffectiveBackendUrl && tournament.getEffectiveBackendUrl()) || tournament.backendUrl || '';
         const response = await fetch(`${backendUrl}/api/t/${tournament.tournamentId}/register_team`, {
             method: 'POST',
             headers: tournament.getAuthHeaders(),

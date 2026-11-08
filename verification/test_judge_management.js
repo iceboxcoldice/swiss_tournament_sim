@@ -25,7 +25,7 @@ global.Blob = class Blob { constructor(content) { this.content = content; } };
 global.URL = { createObjectURL: () => 'blob:url', revokeObjectURL: () => { } };
 
 // Load tournament.js content
-const tournamentJsContent = fs.readFileSync(path.join(__dirname, '../docs/manager/tournament.js'), 'utf8');
+const tournamentJsContent = fs.readFileSync(path.join(__dirname, '../frontend/manager/tournament.js'), 'utf8');
 
 // Evaluate tournament.js in the global context
 // We append assignments to ensure classes are available globally

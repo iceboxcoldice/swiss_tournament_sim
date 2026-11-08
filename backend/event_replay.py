@@ -8,6 +8,10 @@ from typing import Dict, List, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
+
 EVENTS_LOG_FILE = "events.jsonl"
 
 def get_event_log_path(storage_dir: str, tournament_id: Optional[str] = None) -> str:

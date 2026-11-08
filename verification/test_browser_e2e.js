@@ -39,7 +39,7 @@ async function runBrowserTests() {
     fs.mkdirSync(testStorageDir, { recursive: true });
 
     console.log(`1. Launching backend server on port ${PORT}...`);
-    const serverProcess = spawn('/usr/bin/python3', ['main.py'], {
+    const serverProcess = spawn('/usr/bin/python3', ['backend/main.py'], {
         cwd: path.join(__dirname, '..'),
         env: {
             ...process.env,

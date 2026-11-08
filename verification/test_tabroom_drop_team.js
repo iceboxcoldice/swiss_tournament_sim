@@ -9,7 +9,7 @@ const localStorageMock = (() => {
 })();
 global.localStorage = localStorageMock;
 
-const { TournamentManager } = require('../docs/manager/tournament.js');
+const { TournamentManager } = require('../frontend/manager/tournament.js');
 
 async function testDropTeam() {
     console.log('Testing Tabroom Team Drop & Reinstate Functionality in JavaScript...\n');

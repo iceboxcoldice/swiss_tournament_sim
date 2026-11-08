@@ -8,6 +8,9 @@ import unittest
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, PROJECT_ROOT)
+for p in [os.path.join(PROJECT_ROOT, 'backend'), os.path.join(PROJECT_ROOT, 'simulation')]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 import swiss_sim
 import tournament_manager as tm

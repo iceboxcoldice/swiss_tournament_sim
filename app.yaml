@@ -1,5 +1,5 @@
 runtime: python311
-entrypoint: gunicorn -b :$PORT main:app
+entrypoint: gunicorn -b :$PORT backend.main:app
 
 automatic_scaling:
   min_instances: 0

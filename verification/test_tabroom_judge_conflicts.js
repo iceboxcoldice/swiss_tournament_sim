@@ -12,7 +12,7 @@ const localStorageMock = (() => {
 })();
 global.localStorage = localStorageMock;
 
-const { TournamentManager } = require('../docs/manager/tournament.js');
+const { TournamentManager } = require('../frontend/manager/tournament.js');
 
 async function testTabroomJudgeConflicts() {
     console.log("Testing Tabroom Judge Conflicts & Auto-Assignment in JavaScript...\n");

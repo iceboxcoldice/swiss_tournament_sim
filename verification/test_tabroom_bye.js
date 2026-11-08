@@ -9,7 +9,7 @@ const localStorageMock = (() => {
 })();
 global.localStorage = localStorageMock;
 
-const { TournamentManager } = require('../docs/manager/tournament.js');
+const { TournamentManager } = require('../frontend/manager/tournament.js');
 
 async function testTabroomBye() {
     console.log('Testing Tabroom BYE Mechanism in JavaScript...\n');

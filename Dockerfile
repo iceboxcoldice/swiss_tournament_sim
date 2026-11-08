@@ -19,4 +19,4 @@ ENV PORT=8081
 ENV PYTHONUNBUFFERED=1
 
 # Use gunicorn with 1 worker and multi-threading for state consistency
-CMD ["gunicorn", "-b", "0.0.0.0:8081", "--workers", "1", "--threads", "4", "--timeout", "120", "main:app"]
+CMD ["gunicorn", "-b", "0.0.0.0:8081", "--workers", "1", "--threads", "4", "--timeout", "120", "backend.main:app"]

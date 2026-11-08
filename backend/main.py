@@ -9,10 +9,32 @@ from google.cloud import storage
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from functools import wraps
-import tournament_manager as tm
-import swiss_sim
+import sys
 
-app = Flask(__name__, static_folder='docs/manager', static_url_path='')
+# Setup paths for relative directory execution
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(BACKEND_DIR)
+for p in (BACKEND_DIR, PROJECT_ROOT):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+try:
+    from backend import tournament_manager as tm
+except ImportError:
+    import tournament_manager as tm
+
+try:
+    from simulation import swiss_sim
+except ImportError:
+    import swiss_sim
+
+try:
+    from backend import event_replay
+except ImportError:
+    import event_replay
+
+STATIC_DIR = os.path.join(PROJECT_ROOT, 'frontend', 'manager')
+app = Flask(__name__, static_folder=STATIC_DIR, static_url_path='')
 # Enable CORS for GitHub Pages, local development, and external frontends
 CORS(app, resources={
     r"/api/*": {
@@ -39,7 +61,7 @@ logger = logging.getLogger(__name__)
 BUCKET_NAME = os.environ.get('GCS_BUCKET_NAME')
 GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID')
 DEFAULT_TOURNAMENT_ID = 'default'
-LOCAL_STORAGE_DIR = 'local_storage'
+LOCAL_STORAGE_DIR = os.environ.get('LOCAL_STORAGE_DIR', os.path.join(PROJECT_ROOT, 'local_storage'))
 
 # Super Admin Configuration
 SUPER_ADMIN_EMAILS = [
