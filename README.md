@@ -15,7 +15,7 @@ A collection of Python scripts to simulate **Policy Debate tournaments** using S
 **Basic Usage:**
 ```bash
 # Initialize tournament (8 teams, 4 prelim rounds, 2 elim rounds = semifinals + finals)
-python3 backend/tournament_manager.py init 8 4 --elim-rounds 2 --names examples/teams.txt.example
+python3 backend/tournament_manager.py init 8 4 --elim-rounds 2
 
 # Generate pairings for round 1
 python3 backend/tournament_manager.py pair 1
