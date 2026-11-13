@@ -17,3 +17,4 @@ multi_round*.txt
 .env.*
 !.env.example
 tailscale/
+.venv/
